@@ -109,7 +109,8 @@ class SatellitePlanner:
         # Problem Parameters
         self.problem_parameters = self._get_problem_parameters()
 
-        self.X_bar, self.U_bar, self.p_bar = self.initial_guess()
+        # commented out, because we need init_state and and goal_state for our initial guess impelmentation (defined in compute_trajectory)
+        # self.X_bar, self.U_bar, self.p_bar = self.initial_guess()
 
         # Constraints
         constraints = self._get_constraints()
@@ -128,6 +129,7 @@ class SatellitePlanner:
         """
         self.init_state = init_state
         self.goal_state = goal_state
+        self.X_bar, self.U_bar, self.p_bar = self.initial_guess() 
 
         #
         # TODO: Implement SCvx algorithm or comparable
@@ -161,10 +163,46 @@ class SatellitePlanner:
         Define initial guess for SCvx.
         """
         K = self.params.K
+        n_x = self.satellite.n_x
+        n_u = self.satellite.n_u
+        n_p = self.satellite.n_p
 
-        X = np.zeros((self.satellite.n_x, K))
-        U = np.zeros((self.satellite.n_u, K))
-        p = np.zeros((self.satellite.n_p))
+        # Time discretization
+        tau = np.linspace(0, 1, K)
+
+        # Extract start and goal
+        x_init = np.array([
+            self.init_state.x,
+            self.init_state.y,
+            self.init_state.psi,
+            self.init_state.vx,
+            self.init_state.vy,
+            self.init_state.dpsi,
+        ])
+
+        x_goal = np.array([
+            self.goal_state.x,
+            self.goal_state.y,
+            self.goal_state.psi,
+            self.goal_state.vx,
+            self.goal_state.vy,
+            self.goal_state.dpsi,
+        ])
+
+        # Linear interpolation between initial and goal states
+        X = np.zeros((n_x, K))
+        for i in range(K):
+            X[:, i] = (1 - tau[i]) * x_init + tau[i] * x_goal
+
+        # Control guess (small or zero inputs)
+        U = np.zeros((n_u, K))
+
+        # Parameter guess (e.g., final time)
+        p = np.array([10.0])
+
+        # X = np.zeros((self.satellite.n_x, K))
+        # U = np.zeros((self.satellite.n_u, K))
+        # p = np.zeros((self.satellite.n_p))
 
         return X, U, p
 
@@ -192,8 +230,13 @@ class SatellitePlanner:
         Define problem parameters for SCvx.
         """
         problem_parameters = {
-            "init_state": cvx.Parameter(self.satellite.n_x)
-            # ...
+            "init_state": cvx.Parameter(self.satellite.n_x),
+            "goal_state": cvx.Parameter(self.satellite.n_x),
+            "A_bar": cvx.Parameter((self.satellite.n_x, self.satellite.n_x, self.params.K - 1)),
+            "B_plus_bar": cvx.Parameter((self.satellite.n_x, self.satellite.n_u, self.params.K - 1)),
+            "B_minus_bar": cvx.Parameter((self.satellite.n_x, self.satellite.n_u, self.params.K - 1)),
+            "F_bar": cvx.Parameter((self.satellite.n_x, self.satellite.n_p, self.params.K - 1)),
+            "r_bar": cvx.Parameter((self.satellite.n_x, self.params.K - 1)),
         }
 
         return problem_parameters

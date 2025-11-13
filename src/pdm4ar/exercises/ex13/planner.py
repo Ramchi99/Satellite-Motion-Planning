@@ -31,6 +31,8 @@ class SolverParameters:
     # SCVX parameters (Add paper reference)
     lambda_nu: float = 1e5  # slack variable weight
     weight_p: NDArray = field(default_factory=lambda: 10 * np.array([[1.0]]).reshape((1, -1)))  # weight for final time
+    weight_u: float = 1.0  # weight for control inputs
+    # weight_d: float = 1.0  # weight for distance (can be used if we implement new objective using also distance)
 
     tr_radius: float = 5  # initial trust region radius
     min_tr_radius: float = 1e-4  # min trust region radius
@@ -129,7 +131,7 @@ class SatellitePlanner:
         """
         self.init_state = init_state
         self.goal_state = goal_state
-        self.X_bar, self.U_bar, self.p_bar = self.initial_guess() 
+        self.X_bar, self.U_bar, self.p_bar = self.initial_guess()
 
         #
         # TODO: Implement SCvx algorithm or comparable
@@ -171,23 +173,27 @@ class SatellitePlanner:
         tau = np.linspace(0, 1, K)
 
         # Extract start and goal
-        x_init = np.array([
-            self.init_state.x,
-            self.init_state.y,
-            self.init_state.psi,
-            self.init_state.vx,
-            self.init_state.vy,
-            self.init_state.dpsi,
-        ])
+        x_init = np.array(
+            [
+                self.init_state.x,
+                self.init_state.y,
+                self.init_state.psi,
+                self.init_state.vx,
+                self.init_state.vy,
+                self.init_state.dpsi,
+            ]
+        )
 
-        x_goal = np.array([
-            self.goal_state.x,
-            self.goal_state.y,
-            self.goal_state.psi,
-            self.goal_state.vx,
-            self.goal_state.vy,
-            self.goal_state.dpsi,
-        ])
+        x_goal = np.array(
+            [
+                self.goal_state.x,
+                self.goal_state.y,
+                self.goal_state.psi,
+                self.goal_state.vx,
+                self.goal_state.vy,
+                self.goal_state.dpsi,
+            ]
+        )
 
         # Linear interpolation between initial and goal states
         X = np.zeros((n_x, K))
@@ -256,7 +262,15 @@ class SatellitePlanner:
         Define objective for SCvx.
         """
         # Example objective
-        objective = self.params.weight_p @ self.variables["p"]
+        # objective = self.params.weight_p @ self.variables["p"]
+
+        # This objective minimizes both for time (factor 10) and fuel (factor 1)
+        objective = self.params.weight_p @ self.variables["p"] + self.params.weight_u * cvx.sum_squares(
+            self.variables["U"]
+        )
+
+        # We could also include in the cost function the distance of the path (minimize also for the distance)
+        # TODO
 
         return cvx.Minimize(objective)
 

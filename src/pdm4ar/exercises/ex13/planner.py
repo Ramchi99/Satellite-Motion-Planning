@@ -327,6 +327,10 @@ class SatellitePlanner:
         )
 
         # HINT: be aware that the matrices returned by calculate_discretization are flattened in F order (this way affect your code later when you use them)
+        A_bar = A_bar.reshape((self.satellite.n_x, self.satellite.n_x, self.params.K - 1), order="F")
+        B_plus_bar = B_plus_bar.reshape((self.satellite.n_x, self.satellite.n_u, self.params.K - 1), order="F")
+        B_minus_bar = B_minus_bar.reshape((self.satellite.n_x, self.satellite.n_u, self.params.K - 1), order="F")
+        F_bar = F_bar.reshape((self.satellite.n_x, self.satellite.n_p, self.params.K - 1), order="F")
 
         # Populate init_state / goal_state parameter using the first / last state of the current guess (correctness dependent on contraints)
         self.problem_parameters["init_state"].value = self.X_bar[:, 0]

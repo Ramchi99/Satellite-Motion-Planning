@@ -357,6 +357,27 @@ class SatellitePlanner:
         """
         pass
 
+    def _extract_trajectory_from_arrays(
+        self, X_bar: NDArray, U_bar: NDArray, p_bar: NDArray
+    ) -> tuple[DgSampledSequence[SatelliteCommands], DgSampledSequence[SatelliteState]]:
+        """
+        Extracts DgSampledSequence from numpy arrays and timestamps.
+        """
+        K = self.params.K
+        final_time = p_bar[0]
+        timestamps = tuple(np.linspace(0, final_time, K))
+
+        # Commands
+        F_left = U_bar[0, :]
+        F_right = U_bar[1, :]
+        cmds_list = [SatelliteCommands(f_l, f_r) for f_l, f_r in zip(F_left, F_right)]
+        mycmds = DgSampledSequence[SatelliteCommands](timestamps=timestamps, values=cmds_list)
+
+        # States
+        states = [SatelliteState(*X_bar[:, i]) for i in range(K)]
+        mystates = DgSampledSequence[SatelliteState](timestamps=timestamps, values=states)
+        return mycmds, mystates
+
     @staticmethod
     def _extract_seq_from_array() -> tuple[DgSampledSequence[SatelliteCommands], DgSampledSequence[SatelliteState]]:
         """

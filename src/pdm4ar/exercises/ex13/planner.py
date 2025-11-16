@@ -17,7 +17,7 @@ from pdm4ar.exercises.ex13.discretization import *
 from pdm4ar.exercises_def.ex13.utils_params import PlanetParams, AsteroidParams
 
 
-@dataclass(frozen=True)
+@dataclass #(frozen=True) # i don't know if this is good practise to just make it non frozen, but we have to update the tr_radius
 class SolverParameters:
     """
     Definition space for SCvx parameters in case SCvx algorithm is used.
@@ -378,11 +378,56 @@ class SatellitePlanner:
         predicted_improvement = J_old - L_new
         return predicted_improvement <= self.params.stop_crit
 
-    def _update_trust_region(self):
+    def _update_trust_region(self) -> bool:
         """
-        Update trust region radius.
+        Update trust region radius and decide whether to accept or reject the step.
+        Returns True if the step is accepted, False otherwise.
         """
-        pass
+        # Calculate the non-linear cost of the previous trajectory guess (J_old)
+        J_old = self.params.weight_p @ self.p_bar + self.params.weight_u * np.sum(self.U_bar**2)
+
+        # Calculate the non-linear cost of the new trajectory guess (J_new)
+        J_new = (
+            self.params.weight_p @ self.variables["p"].value
+            + self.params.weight_u * np.sum(self.variables["U"].value ** 2)
+        )
+
+        # Get the predicted cost of the new solution from the linearized problem (L_new)
+        L_new = self.problem.value
+
+        # Calculate the actual and predicted improvement
+        actual_improvement = J_old - J_new
+        predicted_improvement = J_old - L_new
+
+        # Avoid division by zero; if predicted improvement is not positive, the step is bad.
+        if predicted_improvement <= 1e-4: # Use a small tolerance
+            rho = -1 # Indicates a bad step
+        else:
+            rho = actual_improvement / predicted_improvement
+
+        # Update the trust region radius based on the rho value
+        if rho <= self.params.rho_0:
+            # Very inaccurate, shrink trust region and reject the step
+            self.params.tr_radius /= self.params.alpha
+            accept_step = False
+        elif rho < self.params.rho_1:
+            # A bit inaccurate, shrink trust region but accept step
+            self.params.tr_radius /= self.params.alpha
+            accept_step = True
+        elif rho < self.params.rho_2:
+            # Quite accurate, keep trust region and accept step
+            accept_step = True
+        else: # rho >= self.params.rho_2
+            # Very accurate, expand trust region and accept step
+            self.params.tr_radius *= self.params.beta
+            accept_step = True
+
+        # Clamp the trust region radius to its min/max values
+        self.params.tr_radius = np.clip(
+            self.params.tr_radius, self.params.min_tr_radius, self.params.max_tr_radius
+        )
+        
+        return accept_step
 
     def _extract_trajectory_from_arrays(
         self, X_bar: NDArray, U_bar: NDArray, p_bar: NDArray

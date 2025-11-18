@@ -1,0 +1,120 @@
+# ============================================================
+# SCvx — ONE FULL OUTER ITERATION
+# ============================================================
+
+# ------------------------------------------------------------
+# INPUT from previous iteration:
+#   X_bar[k], U_bar[k], p_bar    # reference trajectory
+#   trust_radius Δ
+#   penalty weight λ
+# ------------------------------------------------------------
+
+# 1. LINEARIZE DYNAMICS AROUND THE REFERENCE TRAJECTORY X_bar
+for k in 0..K-1:
+
+    # Nonlinear integrator (exact physics)
+    # ψ: (tk, tk+1, x_k, u_k, p) → x_{k+1, true}
+    x_nl = ψ(t_k, t_{k+1}, X_bar[k], U_bar[k], p_bar)
+
+    # Linearization produces:
+    # A_bar[k], B_bar[k], F_bar[k], r_bar[k]
+    # such that:
+    # ψ ≈ A_bar x + B_bar u + F_bar p + r_bar
+    A_bar[k], B_bar[k], F_bar[k], r_bar[k] = linearize_dynamics(X_bar[k], U_bar[k], p_bar)
+
+# ------------------------------------------------------------
+# IMPORTANT EQUALITY (linearized model definition):
+# ψ(tk, tk+1, xk, uk, p) ≈ A_bar[k] xk + B_bar[k] uk + F_bar[k] p + r_bar[k]
+# ------------------------------------------------------------
+
+
+# 2. COMPUTE OLD DEFECTS (δ̄_k) AND OLD MERIT (Jλ_old)
+
+δ_bar = []
+for k in 0..K-1:
+
+    # OPTION A — Nonlinear defect (exact)
+    δ_nl = X_bar[k+1] - ψ(t_k, t_{k+1}, X_bar[k], U_bar[k], p_bar)
+
+    # OPTION B — Linear defect (should match due to how r_bar is defined)
+    δ_lin = X_bar[k+1] - (A_bar[k] @ X_bar[k]
+                          + B_bar[k] @ U_bar[k]
+                          + F_bar[k] @ p_bar
+                          + r_bar[k])
+
+    # They are theoretically identical:
+    δ_bar_k = δ_lin    # or δ_nl
+    δ_bar.append(δ_bar_k)
+
+# OLD MERIT:
+Jλ_old = true_cost(X_bar, U_bar, p_bar) \
+         + λ * sum( ||δ_bar[k]||_1 for k in 0..K-1 )
+
+
+# 3. SOLVE CONVEX SUBPROBLEM TO OBTAIN NEW TRAJECTORY X*, U*, p*
+
+# The optimizer enforces:
+#   X_star[k+1] == A_bar[k] X_star[k]
+#                    + B_bar[k] U_star[k]
+#                    + F_bar[k] p_star
+#                    + r_bar[k]
+#                    + nu[k]                 (virtual control)
+
+X_star, U_star, p_star, nu = solve_convex_subproblem(
+    A_bar, B_bar, F_bar, r_bar,
+    X_bar, U_bar, p_bar,
+    trust_radius = Δ,
+    penalty = λ
+)
+
+# Convex solver returns the predicted (linear-world) objective:
+L_new = predicted_cost(X_star, U_star, p_star, nu)
+
+
+# ------------------------------------------------------------
+# DEFINITION OF VIRTUAL CONTROL INSIDE THE OPTIMIZER:
+# nu[k] = X_star[k+1] - (A_bar[k] X_star[k]
+#                       + B_bar[k] U_star[k]
+#                       + F_bar[k] p_star
+#                       + r_bar[k])
+# ------------------------------------------------------------
+
+
+# 4. COMPUTE NEW DEFECTS δ*_k USING TRUE NONLINEAR DYNAMICS
+
+δ_star = []
+for k in 0..K-1:
+    δ_star_k = X_star[k+1] - ψ(t_k, t_{k+1}, X_star[k], U_star[k], p_star)
+    δ_star.append(δ_star_k)
+
+# NEW MERIT:
+Jλ_new = true_cost(X_star, U_star, p_star) \
+         + λ * sum( ||δ_star[k]||_1 for k in 0..K-1 )
+
+
+# ------------------------------------------------------------
+# DEFINITION OF TRUE DEFECT:
+# δ_k = X_star[k+1] − ψ( X_star[k], U_star[k], p_star )
+# ------------------------------------------------------------
+
+
+# 5. TRUST REGION RATIO ρ
+
+predicted_impr = Jλ_old - L_new
+actual_impr    = Jλ_old - Jλ_new
+
+ρ = actual_impr / predicted_impr
+
+
+# 6. ACCEPT OR REJECT & UPDATE TRUST REGION
+
+if ρ < ρ_low:         # step is bad
+    reject X_star
+    Δ = shrink(Δ)
+else:
+    accept X_star as new X_bar
+    if ρ > ρ_high:    # very good approximation
+        Δ = grow(Δ)
+
+
+# END OF ONE SCvx ITERATION

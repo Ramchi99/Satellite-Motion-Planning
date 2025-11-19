@@ -32,7 +32,7 @@ class SolverParameters:
     max_iterations: int = 100  # max algorithm iterations
 
     # SCVX parameters (Add paper reference)
-    lambda_nu: float = 5e5  # slack variable weight
+    lambda_nu: float = 1e5  # slack variable weight
     weight_p: NDArray = field(default_factory=lambda: 10 * np.array([[1.0]]).reshape((1, -1)))  # weight for final time
     weight_u: float = 1.0  # weight for control inputs
     # weight_d: float = 1.0  # weight for distance (can be used if we implement new objective using also distance)
@@ -177,7 +177,7 @@ class SatellitePlanner:
 
             # You can comment out the line below to disable the verbose iteration summary
             self._debug_print_iteration_summary(i)
-            
+
             # You can comment out the line below to disable the defect/nu_k comparison print
             self._debug_print_defect_comparison()
 
@@ -315,6 +315,7 @@ class SatellitePlanner:
             "r_bar": cvx.Parameter((self.satellite.n_x, self.params.K - 1)),
             "X_bar": cvx.Parameter((self.satellite.n_x, self.params.K)),
             "U_bar": cvx.Parameter((self.satellite.n_u, self.params.K)),
+            "p_bar": cvx.Parameter(self.satellite.n_p),
             "tr_radius": cvx.Parameter(shape=(), nonneg=True),  # the radius is only a scalar float (shape())
         }
 
@@ -340,6 +341,7 @@ class SatellitePlanner:
         r_bar = self.problem_parameters["r_bar"]
         X_bar = self.problem_parameters["X_bar"]
         U_bar = self.problem_parameters["U_bar"]
+        p_bar = self.problem_parameters["p_bar"]
         tr_radius = self.problem_parameters["tr_radius"]
 
         constraints = [
@@ -348,13 +350,15 @@ class SatellitePlanner:
             # X[:, -1] - goal_state == self.variables["nu_tc"], # last state has to be goal_state, or at least close to it!
             X[:, -1] == goal_state,  # last state has to be goal_state
             p >= 0,  # time has to be positive
+            300 >= p,
             0 <= U,  # control input has to be bigger/equal zero
             # Reshape F_limits to a column vector (2, 1) to allow broadcasting against U (2, 50)
             U <= self.sp.F_limits[1],  # control input has to be smaller/equal F_limits self.sp.F_limits[1]
             # U <= self.sp.F_limits[1] + self.variables["nu_s_k"],
             # self.variables["nu_s_k"] >= 0, # Slack for control limits must be non-negative
-            cvx.norm(X - X_bar) <= tr_radius,  # State trust region
-            cvx.norm(U - U_bar) <= tr_radius,  # Control trust region
+            cvx.norm(X - X_bar, "inf") <= tr_radius,  # State trust region
+            # cvx.norm(U - U_bar, 'inf') <= tr_radius,  # Control trust region
+            # cvx.norm(p - p_bar, 'inf') <= tr_radius,  # Time trust region
         ]
 
         # these are the constraints for the linearized dynamics (next_state = Jacobians * current_state, inputs, time and a residual)
@@ -414,7 +418,7 @@ class SatellitePlanner:
         # The `calculate_discretization` call performs both linearization and discretization in one step.
         # It evaluates the symbolic Jacobians (from SatelliteDyn) at each point along the current trajectory guess (X_bar, U_bar)                            │
         # and then integrates the resulting continuous-time linear system to produce the discrete-time matrices (A_bar, B_plus_bar, etc.).                   │
-        # FOH  
+        # FOH
         A_bar, B_plus_bar, B_minus_bar, F_bar, r_bar = self.integrator.calculate_discretization(
             self.X_bar, self.U_bar, self.p_bar
         )
@@ -426,8 +430,26 @@ class SatellitePlanner:
         # Populate init_state / goal_state parameter with the fixed problem boundaries
         # self.problem_parameters["init_state"].value = self.X_bar[:, 0]
         # self.problem_parameters["goal_state"].value = self.X_bar[:, -1]
-        x_init = np.array([self.init_state.x, self.init_state.y, self.init_state.psi, self.init_state.vx, self.init_state.vy, self.init_state.dpsi])
-        x_goal = np.array([self.goal_state.x, self.goal_state.y, self.goal_state.psi, self.goal_state.vx, self.goal_state.vy, self.goal_state.dpsi])
+        x_init = np.array(
+            [
+                self.init_state.x,
+                self.init_state.y,
+                self.init_state.psi,
+                self.init_state.vx,
+                self.init_state.vy,
+                self.init_state.dpsi,
+            ]
+        )
+        x_goal = np.array(
+            [
+                self.goal_state.x,
+                self.goal_state.y,
+                self.goal_state.psi,
+                self.goal_state.vx,
+                self.goal_state.vy,
+                self.goal_state.dpsi,
+            ]
+        )
         self.problem_parameters["init_state"].value = x_init
         self.problem_parameters["goal_state"].value = x_goal
 
@@ -442,6 +464,7 @@ class SatellitePlanner:
         self.problem_parameters["tr_radius"].value = self.params.tr_radius
         self.problem_parameters["X_bar"].value = self.X_bar
         self.problem_parameters["U_bar"].value = self.U_bar
+        self.problem_parameters["p_bar"].value = self.p_bar
 
         # You can comment out the line below to disable the verbose consistency check
         self._debug_check_flow_map_consistency(self.X_bar, self.U_bar, self.p_bar)
@@ -590,7 +613,7 @@ class SatellitePlanner:
         states = [SatelliteState(*v) for v in npstates]
         mystates = DgSampledSequence[SatelliteState](timestamps=ts, values=states)
         return mycmds, mystates
-    
+
     def _debug_print_defect_comparison(self):
         """
         Helper method to print a detailed comparison of defects and virtual controls.
@@ -608,14 +631,22 @@ class SatellitePlanner:
         # Method 2: Using the linearization from _convexification (A_bar, r_bar, etc.).
         defect_X_bar_linear = np.zeros((self.satellite.n_x, K - 1))
         for k in range(K - 1):
-            A_k = cvx.reshape(self.problem_parameters["A_bar"][:, k], (self.satellite.n_x, self.satellite.n_x), order="F").value
-            Bp_k = cvx.reshape(self.problem_parameters["B_plus_bar"][:, k], (self.satellite.n_x, self.satellite.n_u), order="F").value
-            Bm_k = cvx.reshape(self.problem_parameters["B_minus_bar"][:, k], (self.satellite.n_x, self.satellite.n_u), order="F").value
-            F_k = cvx.reshape(self.problem_parameters["F_bar"][:, k], (self.satellite.n_x, self.satellite.n_p), order="F").value
+            A_k = cvx.reshape(
+                self.problem_parameters["A_bar"][:, k], (self.satellite.n_x, self.satellite.n_x), order="F"
+            ).value
+            Bp_k = cvx.reshape(
+                self.problem_parameters["B_plus_bar"][:, k], (self.satellite.n_x, self.satellite.n_u), order="F"
+            ).value
+            Bm_k = cvx.reshape(
+                self.problem_parameters["B_minus_bar"][:, k], (self.satellite.n_x, self.satellite.n_u), order="F"
+            ).value
+            F_k = cvx.reshape(
+                self.problem_parameters["F_bar"][:, k], (self.satellite.n_x, self.satellite.n_p), order="F"
+            ).value
             r_k = self.problem_parameters["r_bar"][:, k].value
-            x_kp1_linearized = A_k @ X_bar[:, k] + Bp_k @ U_bar[:, k+1] + Bm_k @ U_bar[:, k] + F_k @ p_bar + r_k
-            defect_X_bar_linear[:, k] = X_bar[:, k+1] - x_kp1_linearized
-        
+            x_kp1_linearized = A_k @ X_bar[:, k] + Bp_k @ U_bar[:, k + 1] + Bm_k @ U_bar[:, k] + F_k @ p_bar + r_k
+            defect_X_bar_linear[:, k] = X_bar[:, k + 1] - x_kp1_linearized
+
         # --- Defect of X_star ---
         X_nl_star = self.integrator.integrate_nonlinear_piecewise(X_star, U_star, p_star)
         defect_X_star_nonlinear = X_star[:, 1:] - X_nl_star[:, 1:]
@@ -647,7 +678,9 @@ class SatellitePlanner:
             p_new = self.variables["p"].value
             print(f"Solution stats:")
             print(f"  p (time): {p_new[0]:.4f}")
-            print(f"  U min/max: [{np.min(self.variables['U'].value):.4f}, {np.max(self.variables['U'].value):.4f}] (limits: [0, {self.sp.F_limits[1]}])")
+            print(
+                f"  U min/max: [{np.min(self.variables['U'].value):.4f}, {np.max(self.variables['U'].value):.4f}] (limits: [0, {self.sp.F_limits[1]}])"
+            )
             print(f"  X[:,0] error: {np.linalg.norm(X_new[:,0] - self.problem_parameters['init_state'].value):.6e}")
             print(f"  X[:,-1] error: {np.linalg.norm(X_new[:,-1] - self.problem_parameters['goal_state'].value):.6e}")
             print(f"  Trust region: {self.params.tr_radius:.4f}")
@@ -659,7 +692,9 @@ class SatellitePlanner:
         # Use .item() to extract the scalar value from 1-element numpy arrays
         print("Trust region update:")
         print(f"  merit_old: {merit_old.item():.6e}, merit_new: {merit_new.item():.6e}, L_new: {L_new:.6e}")
-        print(f"  actual_improvement: {actual_improvement.item():.6e}, predicted_improvement: {predicted_improvement.item():.6e}")
+        print(
+            f"  actual_improvement: {actual_improvement.item():.6e}, predicted_improvement: {predicted_improvement.item():.6e}"
+        )
 
     def _debug_check_flow_map_consistency(self, X_bar: NDArray, U_bar: NDArray, p_bar: NDArray):
         """
@@ -674,20 +709,28 @@ class SatellitePlanner:
         max_err = 0.0
         for k in range(K - 1):
             # Recover linearized matrices (unflatten)
-            A_k = cvx.reshape(self.problem_parameters["A_bar"][:, k], (self.satellite.n_x, self.satellite.n_x), order="F").value
-            Bp_k = cvx.reshape(self.problem_parameters["B_plus_bar"][:, k], (self.satellite.n_x, self.satellite.n_u), order="F").value
-            Bm_k = cvx.reshape(self.problem_parameters["B_minus_bar"][:, k], (self.satellite.n_x, self.satellite.n_u), order="F").value
-            F_k = cvx.reshape(self.problem_parameters["F_bar"][:, k], (self.satellite.n_x, self.satellite.n_p), order="F").value
+            A_k = cvx.reshape(
+                self.problem_parameters["A_bar"][:, k], (self.satellite.n_x, self.satellite.n_x), order="F"
+            ).value
+            Bp_k = cvx.reshape(
+                self.problem_parameters["B_plus_bar"][:, k], (self.satellite.n_x, self.satellite.n_u), order="F"
+            ).value
+            Bm_k = cvx.reshape(
+                self.problem_parameters["B_minus_bar"][:, k], (self.satellite.n_x, self.satellite.n_u), order="F"
+            ).value
+            F_k = cvx.reshape(
+                self.problem_parameters["F_bar"][:, k], (self.satellite.n_x, self.satellite.n_p), order="F"
+            ).value
             r_k = self.problem_parameters["r_bar"][:, k].value
 
             # Discrete linear model prediction
-            X_lin_kp1 = (A_k @ X_bar[:, k] + Bp_k @ U_bar[:, k + 1] + Bm_k @ U_bar[:, k] + F_k @ p_bar + r_k)
+            X_lin_kp1 = A_k @ X_bar[:, k] + Bp_k @ U_bar[:, k + 1] + Bm_k @ U_bar[:, k] + F_k @ p_bar + r_k
             # Nonlinear flow-map propagated state
             X_nl_kp1 = X_nl[:, k + 1]
             # Difference between linear prediction and nonlinear propagation
             err = np.max(np.abs(X_lin_kp1 - X_nl_kp1))
             max_err = max(max_err, err)
-        
+
         # Report the worst mismatch
         print(f"  Max linearization consistency error: {max_err:.6e}")
         if max_err > 1e-6:

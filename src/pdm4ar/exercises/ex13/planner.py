@@ -34,7 +34,7 @@ class SolverParameters:
     # SCVX parameters (Add paper reference)
     lambda_nu: float = 1e5  # slack variable weight
     weight_p: NDArray = field(default_factory=lambda: 10 * np.array([[1.0]]).reshape((1, -1)))  # weight for final time
-    weight_u: float = 1.0  # weight for control inputs
+    weight_u: float = 10.0  # weight for control inputs
     # weight_d: float = 1.0  # weight for distance (can be used if we implement new objective using also distance)
 
     tr_radius: float = 5  # initial trust region radius
@@ -264,8 +264,8 @@ class SatellitePlanner:
             X[:, i] = (1 - tau[i]) * x_init + tau[i] * x_goal
 
         # Control guess (small or zero inputs)
-        # U = np.zeros((n_u, K))
-        U = np.ones((n_u, K)) * 0.1
+        U = np.zeros((n_u, K))
+        # U = np.ones((n_u, K)) * 0.1
 
         # Parameter guess (e.g., final time)
         p = np.array([10.0])
@@ -358,11 +358,20 @@ class SatellitePlanner:
             # U <= self.sp.F_limits[1] + self.variables["nu_s_k"],
             # self.variables["nu_s_k"] >= 0, # Slack for control limits must be non-negative
 
-            0.2 * cvx.norm(X - X_bar, "inf") + 0.2 * cvx.norm(U - U_bar, 'inf') + 0.6 * cvx.norm(p - p_bar, 'inf') <= tr_radius,
+            #0.2 * cvx.norm(X - X_bar, "inf") + 0.2 * cvx.norm(U - U_bar, 'inf') + 0.6 * cvx.norm(p - p_bar, 'inf') <= tr_radius,
             # cvx.norm(X - X_bar, "inf") <= tr_radius,  # State trust region
             # cvx.norm(U - U_bar, 'inf') <= tr_radius,  # Control trust region
             # cvx.norm(p - p_bar, 'inf') <= tr_radius,  # Time trust region
         ]
+
+        # Per–time-step trust region constraints (51g)
+        for k in range(K):
+            constraints.append(
+                cvx.norm(X[:, k] - X_bar[:, k], "inf")
+                + cvx.norm(U[:, k] - U_bar[:, k], "inf")
+                + cvx.norm(p - p_bar, "inf")
+                <= tr_radius
+            )
 
         # these are the constraints for the linearized dynamics (next_state = Jacobians * current_state, inputs, time and a residual)
         for k in range(K - 1):

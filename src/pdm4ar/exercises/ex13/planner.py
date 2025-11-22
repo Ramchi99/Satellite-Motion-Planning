@@ -184,7 +184,7 @@ class SatellitePlanner:
             # You can comment out the line below to disable the verbose iteration summary
             self._debug_print_iteration_summary(i)
 
-            # You can comment out the line below to disable the defect/nu_k comparison print
+            # You can comment out the line below to disable the defect/nu comparison print
             self._debug_print_defect_comparison()
 
             # 4. Check for convergence (after a grace period of a few iterations)
@@ -298,11 +298,17 @@ class SatellitePlanner:
             "U": cvx.Variable((self.satellite.n_u, self.params.K)),
             "p": cvx.Variable(self.satellite.n_p),
             # Slack variables to evade infeasabililty (relax hard constraints, but high penalty of using "nu")
-            "nu_k": cvx.Variable((self.satellite.n_x, self.params.K - 1)),  # Slack for dynamics (eq. 55b)
-            # "nu_s_k": cvx.Variable((self.satellite.n_u, self.params.K)), # Slack for path constraints (eq. 55d), e.g., control limits
+            "nu": cvx.Variable((self.satellite.n_x, self.params.K - 1)),  # Slack for dynamics (eq. 55b)
+            # "nu_s_k": cvx.Variable((self.satellite.n_u, self.params.K)), # Slack for path constraints (eq. 55d),
             # "nu_ic": cvx.Variable(self.satellite.n_x), # Slack for initial condition (eq. 55e)
             # "nu_tc": cvx.Variable(self.satellite.n_x), # Slack for terminal condition (eq. 55f)
         }
+
+        if len(self.planets) > 0:
+            variables["nu_s"] = cvx.Variable(len(self.planets) * self.params.K, nonneg=True)
+
+        if len(self.asteroids) > 0:
+            variables["nu_s_asteroids"] = cvx.Variable(len(self.asteroids) * self.params.K, nonneg=True)
 
         return variables
 
@@ -324,6 +330,20 @@ class SatellitePlanner:
             "p_bar": cvx.Parameter(self.satellite.n_p),
             "tr_radius": cvx.Parameter(shape=(), nonneg=True),  # the radius is only a scalar float (shape())
         }
+
+        if len(self.planets) > 0:
+            # These parameters are flattened to account for cvxpy's 2D parameter limit.
+            # The index 'idx' for these flattened arrays maps to (planet_idx, time_step_k)
+            # using the formula: idx = planet_idx * self.params.K + time_step_k.
+            #
+            # For 'planet_C', the second dimension (column 0 and 1) represents the x and y
+            # components of the C vector (i.e., C_k = [C_x, C_y]).
+            problem_parameters["planet_C"] = cvx.Parameter((len(self.planets) * self.params.K, 2))
+            problem_parameters["planet_r_prime"] = cvx.Parameter(len(self.planets) * self.params.K)
+
+        if len(self.asteroids) > 0:
+            problem_parameters["asteroid_C"] = cvx.Parameter((len(self.asteroids) * self.params.K, 2))
+            problem_parameters["asteroid_r_prime"] = cvx.Parameter(len(self.asteroids) * self.params.K)
 
         return problem_parameters
 
@@ -361,13 +381,8 @@ class SatellitePlanner:
 
             self.sp.F_limits[0] <= U, # control input has to be bigger/equal F_limits self.sp.F_limits[0]
             U <= self.sp.F_limits[1],  # control input has to be smaller/equal F_limits self.sp.F_limits[1]
-            # U <= self.sp.F_limits[1] + self.variables["nu_s_k"],
-            # self.variables["nu_s_k"] >= 0, # Slack for control limits must be non-negative
 
             #0.2 * cvx.norm(X - X_bar, "inf") + 0.2 * cvx.norm(U - U_bar, 'inf') + 0.6 * cvx.norm(p - p_bar, 'inf') <= tr_radius,
-            # cvx.norm(X - X_bar, "inf") <= tr_radius,  # State trust region
-            # cvx.norm(U - U_bar, 'inf') <= tr_radius,  # Control trust region
-            # cvx.norm(p - p_bar, 'inf') <= tr_radius,  # Time trust region
         ]
 
         # Per–time-step trust region constraints (51g)
@@ -396,8 +411,36 @@ class SatellitePlanner:
                 + B_minus_bar_k @ U[:, k]
                 + F_bar_k @ p
                 + r_bar[:, k]
-                + self.variables["nu_k"][:, k]
+                + self.variables["nu"][:, k]
             )
+
+        # Planet collision avoidance constraints:
+        # The original non-convex constraint for a planet p at timestep k is:
+        # ||X[:2, k] - p_center||^2 >= p_radius^2
+        #
+        # This can be written as h(x_k) <= 0, where h(x_k) = p_radius^2 - ||x_k - p_center||^2.
+        # We linearize this non-convex constraint around the previous trajectory point x_bar_k.
+        # The linearized constraint is: h(x_bar_k) + grad(h(x_bar_k))^T * (x_k - x_bar_k) <= 0.
+        #
+        # After rearranging, this gives a linear constraint of the form:
+        # C_k^T * x_k + r'_k <= 0
+        #
+        # where:
+        # C_k = grad(h(x_bar_k)) = -2 * (x_bar_k - p_center). This is stored in `planet_C`.
+        # r'_k is a constant term derived from the linearization. Stored in `planet_r_prime`.
+        if len(self.planets) > 0:
+            planet_C = self.problem_parameters["planet_C"]
+            planet_r_prime = self.problem_parameters["planet_r_prime"]
+            idx = 0
+            for _ in self.planets:
+                for k in range(K):
+                    # The C_k vector from `planet_C[idx, :]` is a 1x2 row vector.
+                    # X[:2, k] is the 2x1 position vector [x, y]^T.
+                    # Their product gives the scalar C_k^T * x_k.
+                    constraints.append(
+                        planet_C[idx, :] @ X[:2, k] + planet_r_prime[idx] <= self.variables["nu_s"][idx]
+                    )
+                    idx += 1
 
         return constraints
 
@@ -415,10 +458,12 @@ class SatellitePlanner:
         objective = (
             self.params.weight_p @ self.variables["p"]
             + self.params.weight_u * cvx.sum_squares(self.variables["U"])
-            + self.params.lambda_nu * cvx.norm(self.variables["nu_k"], 1)
+            + self.params.lambda_nu * cvx.norm(self.variables["nu"], 1)
             # + self.params.lambda_nu * cvx.norm(self.variables["nu_tc"], 1)
             # + self.params.lambda_nu * cvx.norm(self.variables["nu_s_k"], 1)
         )
+        if len(self.planets) > 0:
+            objective += self.params.lambda_nu * cvx.sum(self.variables["nu_s"])
 
         # We could also include in the cost function the distance of the path (minimize also for the distance)
         # TODO
@@ -487,6 +532,43 @@ class SatellitePlanner:
         # You can comment out the line below to disable the verbose consistency check
         self._debug_check_flow_map_consistency(self.X_bar, self.U_bar, self.p_bar)
 
+        # Update planet constraint parameters for the current linearization.
+        num_planets = len(self.planets)
+        if num_planets > 0:
+            # --- Configuration Space Expansion ---
+            # To ensure the entire satellite body avoids the planets, we "grow" the
+            # planet's radius by the satellite's enclosing radius. We calculate this
+            # from the corner of the satellite's bounding box using the user-provided formula.
+            satellite_radius = np.sqrt((self.sg.w_half + self.sg.w_panel)**2 + (self.sg.l_f**2))
+            
+            # These parameters are flattened, where 'idx' = planet_idx * K + time_step_k.
+            planet_C_val = np.zeros((num_planets * self.params.K, 2))
+            planet_r_prime_val = np.zeros(num_planets * self.params.K)
+
+            idx = 0
+            for i, planet in enumerate(self.planets.values()):
+                p_center = np.array(planet.center)
+                # Use the effective radius for the constraint calculation.
+                effective_radius = planet.radius + satellite_radius
+                
+                for k in range(self.params.K):
+                    x_bar_k = self.X_bar[:2, k] # (x, y) components of the reference state
+                    
+                    # Calculate C_k = -2 * (x_bar_k - p_center)
+                    C_k = -2 * (x_bar_k - p_center)
+                    planet_C_val[idx, :] = C_k
+                    
+                    # Calculate r'_k = r_eff^2 - ||x_bar_k - p_center||^2 + 2 * (x_bar_k - p_center)^T * x_bar_k
+                    r_prime_k = (effective_radius**2 
+                                 - np.sum((x_bar_k - p_center)**2) 
+                                 + 2 * (x_bar_k - p_center) @ x_bar_k)
+                    planet_r_prime_val[idx] = r_prime_k
+                    
+                    idx += 1
+                    
+            self.problem_parameters["planet_C"].value = planet_C_val
+            self.problem_parameters["planet_r_prime"].value = planet_r_prime_val
+
     def _check_convergence(self) -> bool:
         """
         Check convergence of SCvx.
@@ -506,11 +588,11 @@ class SatellitePlanner:
         return predicted_improvement <= self.params.stop_crit
         """
         """
-        nu_k_norm = np.linalg.norm(self.variables["nu_k"].value)
+        nu_norm = np.linalg.norm(self.variables["nu"].value)
         # nu_tc_norm = np.linalg.norm(self.variables["nu_tc"].value)
         # nu_s_k_norm = np.linalg.norm(self.variables["nu_s_k"].value)
-        # total_slack = nu_k_norm + nu_tc_norm + nu_s_k_norm
-        total_slack = nu_k_norm
+        # total_slack = nu_norm + nu_tc_norm + nu_s_k_norm
+        total_slack = nu_norm
 
         converged = total_slack < self.params.stop_crit
         print(f"  Total slack: {total_slack:.6e} (threshold: {self.params.stop_crit:.6e})")
@@ -675,7 +757,7 @@ class SatellitePlanner:
         """
         X_bar, U_bar, p_bar = self.X_bar, self.U_bar, self.p_bar
         X_star, U_star, p_star = self.variables["X"].value, self.variables["U"].value, self.variables["p"].value
-        nu_k_val = self.variables["nu_k"].value
+        nu_val = self.variables["nu"].value
         K = self.params.K
 
         # --- Defect of X_bar ---
@@ -712,7 +794,7 @@ class SatellitePlanner:
         print(f"  ||defect(X_bar)|| [via linear approx]:       {np.linalg.norm(defect_X_bar_linear):.4e}")
         print(f"  --> Difference: {np.linalg.norm(defect_X_bar_nonlinear - defect_X_bar_linear):.4e}")
         print("\n  -- For Candidate Trajectory (X_star) --")
-        print(f"  ||nu_k(X_star)||      [Virtual Control]:      {np.linalg.norm(nu_k_val):.4e}")
+        print(f"  ||nu(X_star)||      [Virtual Control]:      {np.linalg.norm(nu_val):.4e}")
         print(f"  ||defect(X_star)||    [True Nonlinear Error]: {np.linalg.norm(defect_X_star_nonlinear):.4e}")
 
     def _debug_print_iteration_summary(self, i: int):
@@ -724,9 +806,9 @@ class SatellitePlanner:
             print(f"Total objective: {self.problem.value:.6e}")
 
             # Break down which slack is the problem
-            nu_k = self.variables["nu_k"].value
+            nu = self.variables["nu"].value
             print(f"Slack breakdown:")
-            print(f"  nu_k (dynamics): {np.linalg.norm(nu_k):.6e}, max: {np.max(np.abs(nu_k)):.6e}")
+            print(f"  nu (dynamics): {np.linalg.norm(nu):.6e}, max: {np.max(np.abs(nu)):.6e}")
 
             # Check if we're at the boundaries
             X_new = self.variables["X"].value

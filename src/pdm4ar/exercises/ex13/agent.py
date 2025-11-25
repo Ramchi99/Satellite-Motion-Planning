@@ -181,7 +181,7 @@ class SatelliteAgent(Agent):
         deviation_metric = np.max(normalized_errors)
 
         # 2. Check if the unitless deviation metric exceeds 1.0
-        if deviation_metric > 1.0:
+        if deviation_metric > 1e6: #1.0:
             print(f"Replanning at time {sim_obs.time:.2f} s. Deviation metric: {deviation_metric:.3f} > 1.0")
             # 3. Re-compute trajectory from the current state
             self.cmds_plan, self.state_traj = self.planner.compute_trajectory(current_state, self.goal_state)

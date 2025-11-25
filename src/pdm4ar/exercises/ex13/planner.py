@@ -34,7 +34,7 @@ class SolverParameters:
     # SCVX parameters (Add paper reference)
     lambda_nu: float = 1e5  # slack variable weight
     weight_p: NDArray = field(default_factory=lambda: 10 * np.array([[1.0]]).reshape((1, -1)))  # weight for final time
-    weight_u: float = 10.0  # weight for control inputs
+    weight_u: float = 100.0  # weight for control inputs
     # weight_d: float = 1.0  # weight for distance (can be used if we implement new objective using also distance)
 
     tr_radius: float = 5  # initial trust region radius
@@ -214,6 +214,16 @@ class SatellitePlanner:
         # 7. Extract the final trajectory
         # After the loop is finished, convert the final trajectory into the required format.
         print("X_bar: ", self.X_bar, "U_bar: ", self.U_bar, "p_bar: ", self.p_bar)
+
+        # ================= ADD THIS BLOCK =================
+        # Check for "Soft Failure" (Collision Slack)
+        if "nu_s_asteroids" in self.variables and self.variables["nu_s_asteroids"].value is not None:
+            max_ast_slack = np.max(self.variables["nu_s_asteroids"].value)
+            print(f"\n[DEBUG] Final Max Asteroid Slack: {max_ast_slack:.6e}")
+            if max_ast_slack > 1e-3:
+                print("WARNING: Trajectory is INFEASIBLE. The solver is 'paying' the penalty to crash.")
+        # ==================================================
+
         mycmds, mystates = self._extract_trajectory_from_arrays(self.X_bar, self.U_bar, self.p_bar)
 
         """
@@ -293,22 +303,32 @@ class SatellitePlanner:
         """
         Define optimisation variables for SCvx.
         """
+        K = self.params.K
+
+        n_x = self.satellite.n_x
+        n_u = self.satellite.n_u
+        n_p = self.satellite.n_p
+
+        n_planets = len(self.planets)
+        n_asteroids = len(self.asteroids)
+
         variables = {
-            "X": cvx.Variable((self.satellite.n_x, self.params.K)),
-            "U": cvx.Variable((self.satellite.n_u, self.params.K)),
-            "p": cvx.Variable(self.satellite.n_p),
-            # Slack variables to evade infeasabililty (relax hard constraints, but high penalty of using "nu")
-            "nu": cvx.Variable((self.satellite.n_x, self.params.K - 1)),  # Slack for dynamics (eq. 55b)
-            # "nu_s_k": cvx.Variable((self.satellite.n_u, self.params.K)), # Slack for path constraints (eq. 55d),
-            # "nu_ic": cvx.Variable(self.satellite.n_x), # Slack for initial condition (eq. 55e)
-            # "nu_tc": cvx.Variable(self.satellite.n_x), # Slack for terminal condition (eq. 55f)
+            "X": cvx.Variable((n_x, K)),
+            "U": cvx.Variable((n_u, K)),
+            "p": cvx.Variable(n_p),
+            # Dynamic virtual control (Eq 47a)
+            "nu": cvx.Variable((n_x, K - 1)),
+            # Initial Condition virtual control (Eq 47c)
+            "nu_ic": cvx.Variable(n_x), 
+            # Terminal Condition virtual control (Eq 47d)
+            "nu_tc": cvx.Variable(n_x),
         }
 
-        if len(self.planets) > 0:
-            variables["nu_s"] = cvx.Variable(len(self.planets) * self.params.K, nonneg=True)
+        if n_planets > 0:
+            variables["nu_s"] = cvx.Variable(n_planets * K, nonneg=True) # Slack for planet constraints
 
-        if len(self.asteroids) > 0:
-            variables["nu_s_asteroids"] = cvx.Variable(len(self.asteroids) * self.params.K, nonneg=True)
+        if n_asteroids > 0:
+            variables["nu_s_asteroids"] = cvx.Variable(n_asteroids * K, nonneg=True) # Slack for asteroid constraints
 
         return variables
 
@@ -316,34 +336,44 @@ class SatellitePlanner:
         """
         Define problem parameters for SCvx.
         """
+        K = self.params.K
+
+        n_x = self.satellite.n_x
+        n_u = self.satellite.n_u
+        n_p = self.satellite.n_p
+
+        n_planets = len(self.planets)
+        n_asteroids = len(self.asteroids)
+
         # dim(cvx.Parameter) <= 2
         problem_parameters = {
-            "init_state": cvx.Parameter(self.satellite.n_x),
-            "goal_state": cvx.Parameter(self.satellite.n_x),
-            "A_bar": cvx.Parameter((self.satellite.n_x * self.satellite.n_x, self.params.K - 1)),
-            "B_plus_bar": cvx.Parameter((self.satellite.n_x * self.satellite.n_u, self.params.K - 1)),
-            "B_minus_bar": cvx.Parameter((self.satellite.n_x * self.satellite.n_u, self.params.K - 1)),
-            "F_bar": cvx.Parameter((self.satellite.n_x * self.satellite.n_p, self.params.K - 1)),
-            "r_bar": cvx.Parameter((self.satellite.n_x, self.params.K - 1)),
-            "X_bar": cvx.Parameter((self.satellite.n_x, self.params.K)),
-            "U_bar": cvx.Parameter((self.satellite.n_u, self.params.K)),
-            "p_bar": cvx.Parameter(self.satellite.n_p),
-            "tr_radius": cvx.Parameter(shape=(), nonneg=True),  # the radius is only a scalar float (shape())
+            "init_state": cvx.Parameter(n_x),
+            "goal_state": cvx.Parameter(n_x),
+            "X_bar": cvx.Parameter((n_x, K)),
+            "U_bar": cvx.Parameter((n_u, K)),
+            "p_bar": cvx.Parameter(n_p),
+            "A_bar": cvx.Parameter((n_x * n_x, K - 1)),
+            "B_plus_bar": cvx.Parameter((n_x * n_u, K - 1)),
+            "B_minus_bar": cvx.Parameter((n_x * n_u, K - 1)),
+            "F_bar": cvx.Parameter((n_x * n_p, K - 1)),
+            "r_bar": cvx.Parameter((n_x, K - 1)),
+            "tr_radius": cvx.Parameter(),  # the radius is only a scalar float (shape())
         }
 
-        if len(self.planets) > 0:
-            # These parameters are flattened to account for cvxpy's 2D parameter limit.
-            # The index 'idx' for these flattened arrays maps to (planet_idx, time_step_k)
-            # using the formula: idx = planet_idx * self.params.K + time_step_k.
-            #
-            # For 'planet_C', the second dimension (column 0 and 1) represents the x and y
-            # components of the C vector (i.e., C_k = [C_x, C_y]).
-            problem_parameters["planet_C"] = cvx.Parameter((len(self.planets) * self.params.K, 2))
-            problem_parameters["planet_r_prime"] = cvx.Parameter(len(self.planets) * self.params.K)
+        if n_planets > 0:
+            problem_parameters["planet_C"] = cvx.Parameter((n_planets * K, 2))
+            problem_parameters["planet_r_prime"] = cvx.Parameter(n_planets * K)
 
-        if len(self.asteroids) > 0:
-            problem_parameters["asteroid_C"] = cvx.Parameter((len(self.asteroids) * self.params.K, 2))
-            problem_parameters["asteroid_r_prime"] = cvx.Parameter(len(self.asteroids) * self.params.K)
+        if n_asteroids > 0:
+            problem_parameters["asteroid_C"] = cvx.Parameter((n_asteroids * K, 2))
+            problem_parameters["asteroid_r_prime"] = cvx.Parameter(n_asteroids * K)
+
+        # These parameters are flattened to account for cvxpy's 2D parameter limit.
+        # The index 'idx' for these flattened arrays maps to (planet_idx, time_step_k)
+        # using the formula: idx = planet_idx * self.params.K + time_step_k.
+        #
+        # For 'planet_C', the second dimension (column 0 and 1) represents the x and y
+        # components of the C vector (i.e., C_k = [C_x, C_y]).
 
         return problem_parameters
 
@@ -351,39 +381,65 @@ class SatellitePlanner:
         """
         Define constraints for SCvx.
         """
-        # Write vaaraibles for better readability
+        K = self.params.K
+        n_x = self.satellite.n_x
+        n_u = self.satellite.n_u
+        n_p = self.satellite.n_p
+
         X = self.variables["X"]
         U = self.variables["U"]
         p = self.variables["p"]
-        K = self.params.K
+        nu = self.variables["nu"]
+        nu_ic = self.variables["nu_ic"]
+        nu_tc = self.variables["nu_tc"]
 
-        # Write parameters for better readability
         init_state = self.problem_parameters["init_state"]
         goal_state = self.problem_parameters["goal_state"]
+        
+        X_bar = self.problem_parameters["X_bar"]
+        U_bar = self.problem_parameters["U_bar"]
+        p_bar = self.problem_parameters["p_bar"]
+
         A_bar = self.problem_parameters["A_bar"]
         B_plus_bar = self.problem_parameters["B_plus_bar"]
         B_minus_bar = self.problem_parameters["B_minus_bar"]
         F_bar = self.problem_parameters["F_bar"]
         r_bar = self.problem_parameters["r_bar"]
-        X_bar = self.problem_parameters["X_bar"]
-        U_bar = self.problem_parameters["U_bar"]
-        p_bar = self.problem_parameters["p_bar"]
+        
         tr_radius = self.problem_parameters["tr_radius"]
 
+        # boundary conditions
         constraints = [
-            # self.variables["X"][:, 0] == self.problem_parameters["init_state"],
-            X[:, 0] == init_state,  # first state has to be init_state
-            # X[:, -1] - goal_state == self.variables["nu_tc"], # last state has to be goal_state, or at least close to it!
-            X[:, -1] == goal_state,  # last state has to be goal_state
-
-            p >= 0,  # time has to be positive
-            300 >= p,
-
-            self.sp.F_limits[0] <= U, # control input has to be bigger/equal F_limits self.sp.F_limits[0]
-            U <= self.sp.F_limits[1],  # control input has to be smaller/equal F_limits self.sp.F_limits[1]
-
-            #0.2 * cvx.norm(X - X_bar, "inf") + 0.2 * cvx.norm(U - U_bar, 'inf') + 0.6 * cvx.norm(p - p_bar, 'inf') <= tr_radius,
+            #X[:, 0] == init_state,
+            #X[:, -1] == goal_state,
+            X[:, 0] + nu_ic == init_state,      # Initial condition with slack
+            X[:, -1] + nu_tc == goal_state,     # Terminal condition with slack
+            U[:, 0] == np.array([0, 0]),
+            U[:, -1] == np.array([0, 0]),
+            p[0] >= 0,
         ]
+
+        # dynamics constraints
+        for k in range(K - 1):
+            A_bar_k = cvx.reshape(A_bar[:, k], (n_x, n_x), order="F")
+            B_plus_bar_k = cvx.reshape(B_plus_bar[:, k], (n_x, n_u), order="F")
+            B_minus_bar_k = cvx.reshape(B_minus_bar[:, k], (n_x, n_u), order="F")
+            F_bar_k = cvx.reshape(F_bar[:, k], (n_x, n_p), order="F")
+
+            constraints.append(
+                X[:, k + 1]
+                == A_bar_k @ X[:, k]
+                + B_plus_bar_k @ U[:, k + 1]
+                + B_minus_bar_k @ U[:, k]
+                + F_bar_k @ p
+                + r_bar[:, k]
+                + nu[:, k]
+            )
+
+        # convex path constraints
+        F_max = self.satellite.sp.F_limits[1]
+        for k in range(K):
+            constraints.append(cvx.norm(U[:, k], "inf") <= F_max)
 
         # Per–time-step trust region constraints (51g)
         for k in range(K):
@@ -394,25 +450,6 @@ class SatellitePlanner:
                 <= tr_radius
             )
 
-        # these are the constraints for the linearized dynamics (next_state = Jacobians * current_state, inputs, time and a residual)
-        for k in range(K - 1):
-            # this reshaping is crucial
-            # (from the calculate_discretization we get order "F" flattend matricies, we need to reshape them to then describe the dynamic constraints)
-            # also the dimension of csv.Paramter has to be <= 2.
-            A_bar_k = cvx.reshape(A_bar[:, k], (self.satellite.n_x, self.satellite.n_x), order="F")
-            B_plus_bar_k = cvx.reshape(B_plus_bar[:, k], (self.satellite.n_x, self.satellite.n_u), order="F")
-            B_minus_bar_k = cvx.reshape(B_minus_bar[:, k], (self.satellite.n_x, self.satellite.n_u), order="F")
-            F_bar_k = cvx.reshape(F_bar[:, k], (self.satellite.n_x, self.satellite.n_p), order="F")
-
-            constraints.append(
-                X[:, k + 1]
-                == A_bar_k @ X[:, k]
-                + B_plus_bar_k @ U[:, k + 1]
-                + B_minus_bar_k @ U[:, k]
-                + F_bar_k @ p
-                + r_bar[:, k]
-                + self.variables["nu"][:, k]
-            )
 
         # Planet collision avoidance constraints:
         # The original non-convex constraint for a planet p at timestep k is:
@@ -437,8 +474,36 @@ class SatellitePlanner:
                     # The C_k vector from `planet_C[idx, :]` is a 1x2 row vector.
                     # X[:2, k] is the 2x1 position vector [x, y]^T.
                     # Their product gives the scalar C_k^T * x_k.
+                    constraints.append(planet_C[idx, :] @ X[:2, k] + planet_r_prime[idx] <= self.variables["nu_s"][idx])
+                    idx += 1
+
+        # Asteroid collision avoidance constraints:
+        # The original non-convex constraint for an asteroid 'a' at timestep k is:
+        # ||X[:2, k] - a_center_k||^2 >= a_radius^2
+        # where a_center_k is the predicted position of the asteroid at time k.
+        #
+        # This can be written as h(x_k) <= 0, where h(x_k) = a_radius^2 - ||x_k - a_center_k||^2.
+        # We linearize this non-convex constraint around the previous trajectory point x_bar_k.
+        # The linearized constraint is: h(x_bar_k) + grad(h(x_bar_k))^T * (x_k - x_bar_k) <= 0.
+        #
+        # After rearranging, this gives a linear constraint of the form:
+        # C_k^T * x_k + r'_k <= 0
+        #
+        # where:
+        # C_k = grad(h(x_bar_k)) = -2 * (x_bar_k - a_center_k). This is stored in `asteroid_C`.
+        # r'_k is a constant term derived from the linearization. Stored in `asteroid_r_prime`.
+        # Note that a_center_k is time-dependent.
+        if len(self.asteroids) > 0:
+            asteroid_C = self.problem_parameters["asteroid_C"]
+            asteroid_r_prime = self.problem_parameters["asteroid_r_prime"]
+            idx = 0
+            for _ in self.asteroids:
+                for k in range(K):
+                    # The C_k vector from `asteroid_C[idx, :]` is a 1x2 row vector.
+                    # X[:2, k] is the 2x1 position vector [x, y]^T.
+                    # Their product gives the scalar C_k^T * x_k.
                     constraints.append(
-                        planet_C[idx, :] @ X[:2, k] + planet_r_prime[idx] <= self.variables["nu_s"][idx]
+                        asteroid_C[idx, :] @ X[:2, k] + asteroid_r_prime[idx] <= self.variables["nu_s_asteroids"][idx]
                     )
                     idx += 1
 
@@ -455,6 +520,7 @@ class SatellitePlanner:
         # objective = self.params.weight_p @ self.variables["p"] + self.params.weight_u * cvx.sum_squares(
         #     self.variables["U"]
         # )
+        """
         objective = (
             self.params.weight_p @ self.variables["p"]
             + self.params.weight_u * cvx.sum_squares(self.variables["U"])
@@ -465,10 +531,70 @@ class SatellitePlanner:
         if len(self.planets) > 0:
             objective += self.params.lambda_nu * cvx.sum(self.variables["nu_s"])
 
+        if len(self.asteroids) > 0:
+            objective += self.params.lambda_nu * cvx.sum(self.variables["nu_s_asteroids"])
+
         # We could also include in the cost function the distance of the path (minimize also for the distance)
         # TODO
 
         return cvx.Minimize(objective)
+        """
+        # Variables
+        U = self.variables["U"]
+        p = self.variables["p"]
+        nu = self.variables["nu"]     # Shape (n_x, K-1)
+        nu_ic = self.variables["nu_ic"]
+        nu_tc = self.variables["nu_tc"]
+        
+        K = self.params.K
+        dt_norm = 1.0 / (K - 1)
+        lambda_val = self.params.lambda_nu
+
+        # --- 1. Augmented Terminal Cost ---
+        J_terminal = self.params.weight_p @ p
+        penalty_boundary = lambda_val * (cvx.norm(nu_ic, 1) + cvx.norm(nu_tc, 1))
+
+        # --- 2. Augmented Running Cost (Trapezoidal) ---
+        integral_sum = 0
+        
+        for k in range(K):
+            # Weight: 0.5 for endpoints, 1.0 otherwise
+            weight = 0.5 if (k == 0 or k == K - 1) else 1.0
+            
+            # A. Fuel Cost
+            cost_fuel = self.params.weight_u * cvx.sum_squares(U[:, k])
+            
+            # B. Dynamics Slack (nu)
+            # nu is defined for k=0 to K-2. For k=K-1, slack is 0 (per paper text).
+            if k < K - 1:
+                cost_dynamics = lambda_val * cvx.norm(nu[:, k], 1)
+            else:
+                cost_dynamics = 0
+            
+            # C. State Constraint Slack (nu_s)
+            cost_collision = 0
+            if "nu_s" in self.variables:
+                # Assuming nu_s is flattened (len_planets * K)
+                # We access the slice corresponding to time step k
+                n_planets = len(self.planets)
+                # Striding: idx = planet_i * K + k
+                # We sum the slack for all planets at this specific time k
+                # indices: k, k+K, k+2K ...
+                indices = [i * K + k for i in range(n_planets)]
+                cost_collision += lambda_val * cvx.sum(self.variables["nu_s"][indices])
+
+            if "nu_s_asteroids" in self.variables:
+                n_asteroids = len(self.asteroids)
+                indices = [i * K + k for i in range(n_asteroids)]
+                cost_collision += lambda_val * cvx.sum(self.variables["nu_s_asteroids"][indices])
+
+            # Add weighted term to integral
+            integral_sum += weight * (cost_fuel + cost_dynamics + cost_collision)
+
+        # Apply dt
+        J_running = integral_sum * dt_norm
+
+        return cvx.Minimize(J_terminal + penalty_boundary + J_running)
 
     def _convexification(self):
         """
@@ -539,8 +665,8 @@ class SatellitePlanner:
             # To ensure the entire satellite body avoids the planets, we "grow" the
             # planet's radius by the satellite's enclosing radius. We calculate this
             # from the corner of the satellite's bounding box using the user-provided formula.
-            satellite_radius = np.sqrt((self.sg.w_half + self.sg.w_panel)**2 + (self.sg.l_f**2))
-            
+            satellite_radius = np.sqrt((self.sg.w_half + self.sg.w_panel) ** 2 + (self.sg.l_f**2)) + 0.5
+
             # These parameters are flattened, where 'idx' = planet_idx * K + time_step_k.
             planet_C_val = np.zeros((num_planets * self.params.K, 2))
             planet_r_prime_val = np.zeros(num_planets * self.params.K)
@@ -550,24 +676,64 @@ class SatellitePlanner:
                 p_center = np.array(planet.center)
                 # Use the effective radius for the constraint calculation.
                 effective_radius = planet.radius + satellite_radius
-                
+
                 for k in range(self.params.K):
-                    x_bar_k = self.X_bar[:2, k] # (x, y) components of the reference state
-                    
+                    x_bar_k = self.X_bar[:2, k]  # (x, y) components of the reference state
+
                     # Calculate C_k = -2 * (x_bar_k - p_center)
                     C_k = -2 * (x_bar_k - p_center)
                     planet_C_val[idx, :] = C_k
-                    
+
                     # Calculate r'_k = r_eff^2 - ||x_bar_k - p_center||^2 + 2 * (x_bar_k - p_center)^T * x_bar_k
-                    r_prime_k = (effective_radius**2 
-                                 - np.sum((x_bar_k - p_center)**2) 
-                                 + 2 * (x_bar_k - p_center) @ x_bar_k)
+                    r_prime_k = (
+                        effective_radius**2 - np.sum((x_bar_k - p_center) ** 2) + 2 * (x_bar_k - p_center) @ x_bar_k
+                    )
                     planet_r_prime_val[idx] = r_prime_k
-                    
+
                     idx += 1
-                    
+
             self.problem_parameters["planet_C"].value = planet_C_val
             self.problem_parameters["planet_r_prime"].value = planet_r_prime_val
+
+        # Update asteroid constraint parameters for the current linearization.
+        num_asteroids = len(self.asteroids)
+        if num_asteroids > 0:
+            # Satellite radius is already calculated above for planets --> only if planets exist!
+            satellite_radius = np.sqrt((self.sg.w_half + self.sg.w_panel) ** 2 + (self.sg.l_f**2))
+
+            asteroid_C_val = np.zeros((num_asteroids * self.params.K, 2))
+            asteroid_r_prime_val = np.zeros(num_asteroids * self.params.K)
+
+            idx = 0
+            for i, asteroid in enumerate(self.asteroids.values()):
+                # Use the effective radius for the constraint calculation.
+                effective_radius = asteroid.radius + satellite_radius
+
+                for k in range(self.params.K):
+                    # Calculate time t_k for the current time step k
+                    t_k = (k / (self.params.K - 1)) * self.p_bar[0] if self.params.K > 1 else 0.0
+
+                    # Predict asteroid position at time t_k
+                    p_asteroid_center_k = self._get_asteroid_position(asteroid, t_k)
+
+                    x_bar_k = self.X_bar[:2, k]  # (x, y) components of the reference state
+
+                    # Calculate C_k = -2 * (x_bar_k - p_asteroid_center_k)
+                    C_k = -2 * (x_bar_k - p_asteroid_center_k)
+                    asteroid_C_val[idx, :] = C_k
+
+                    # Calculate r'_k = r_eff^2 - ||x_bar_k - p_asteroid_center_k||^2 + 2 * (x_bar_k - p_asteroid_center_k)^T * x_bar_k
+                    r_prime_k = (
+                        effective_radius**2
+                        - np.sum((x_bar_k - p_asteroid_center_k) ** 2)
+                        + 2 * (x_bar_k - p_asteroid_center_k) @ x_bar_k
+                    )
+                    asteroid_r_prime_val[idx] = r_prime_k
+
+                    idx += 1
+
+            self.problem_parameters["asteroid_C"].value = asteroid_C_val
+            self.problem_parameters["asteroid_r_prime"].value = asteroid_r_prime_val
 
     def _check_convergence(self) -> bool:
         """
@@ -605,12 +771,12 @@ class SatellitePlanner:
         p_star = self.variables["p"].value
 
         # Calculate change in p
-        p_change = np.linalg.norm(p_star - self.p_bar) # L2 norm for scalar p
+        p_change = np.linalg.norm(p_star - self.p_bar)  # L2 norm for scalar p
 
         # Calculate max_k(||xk - xk_bar||)
         max_x_change = 0.0
         for k in range(self.params.K):
-            current_x_change = np.linalg.norm(X_star[:, k] - self.X_bar[:, k]) # L2 norm for state vector at time k
+            current_x_change = np.linalg.norm(X_star[:, k] - self.X_bar[:, k])  # L2 norm for state vector at time k
             max_x_change = max(max_x_change, current_x_change)
 
         trajectory_change = p_change + max_x_change
@@ -628,17 +794,20 @@ class SatellitePlanner:
         if merit_old > 1e-6:
             relative_improvement = predicted_improvement / merit_old
             converged_by_cost = relative_improvement < self.params.relative_stop_crit
-            print(f"  Relative predicted improvement: {relative_improvement.item():.6e} (threshold: {self.params.relative_stop_crit:.6e})")
+            print(
+                f"  Relative predicted improvement: {relative_improvement.item():.6e} (threshold: {self.params.relative_stop_crit:.6e})"
+            )
         else:
             converged_by_cost = False
             print(f"  Relative predicted improvement: N/A (merit_old is too small)")
-            
+
         return converged_by_trajectory or converged_by_cost
 
     def _calculate_nonlinear_merit(self, X: NDArray, U: NDArray, p: NDArray) -> float:
         """
         Calculates the nonlinear merit function Jλ(x,u,p) using a sequential defect calculation
         as described in the SCvx paper (Fig. 15).  ---  𝛿_k = x_{k+1} - 𝜓(⋅)  ---
+        """
         """
         # J(cost): Time and fuel objective
         cost = (self.params.weight_p @ p).item() + self.params.weight_u * np.sum(U**2)
@@ -656,6 +825,79 @@ class SatellitePlanner:
         # Total merit Jλ
         merit = cost + self.params.lambda_nu * total_defect
         return merit
+        """
+        K = self.params.K
+        # Normalized time step dt for the interval [0, 1]
+        dt_norm = 1.0 / (K - 1)
+        lambda_val = self.params.lambda_nu
+
+        # --- 1. Augmented Terminal Cost (Phi_lambda) ---
+        # Original Terminal Cost (Time)
+        J_val = (self.params.weight_p @ p).item()
+        
+        # Boundary Violations (Eq 50): Penalized with lambda
+        init_error = np.linalg.norm(X[:, 0] - self.problem_parameters['init_state'].value, 1)
+        goal_error = np.linalg.norm(X[:, -1] - self.problem_parameters['goal_state'].value, 1)
+        J_val += lambda_val * (init_error + goal_error)
+
+        # --- 2. Augmented Running Cost (Gamma_lambda) ---
+        # We calculate the running terms for every step k, then apply weights.
+        
+        # A. Dynamics Defects (delta_k)
+        # Integrate nonlinear dynamics to find actual next states
+        X_nl_piecewise = self.integrator.integrate_nonlinear_piecewise(X, U, p)
+        
+        # Calculate defect: ||x_{k+1} - integrated(x_k)||_1
+        # This results in a sequence of length K-1.
+        # As per paper (text below Eq 51), nu_N is undefined, so we assume defect_N = 0.
+        defects = np.sum(np.abs(X[:, 1:] - X_nl_piecewise[:, 1:]), axis=0) # Shape (K-1,)
+        defects = np.append(defects, 0.0) # Shape (K,) to match time grid
+
+        # B. State Constraints (Collisions) ([s]^+ from Eq 61)
+        # We calculate the sum of violations for all planets/asteroids at each step k
+        collision_violations = np.zeros(K)
+        
+        # Satellite radius helper
+        sat_rad = np.sqrt((self.sg.w_half + self.sg.w_panel) ** 2 + (self.sg.l_f**2)) + 0.5
+
+        # Check Planets
+        if len(self.planets) > 0:
+            for planet in self.planets.values():
+                p_center = np.array(planet.center)
+                eff_rad = planet.radius + sat_rad
+                dists = np.linalg.norm(X[:2, :] - p_center.reshape(-1,1), axis=0)
+                # Constraint: dist >= rad  -->  Violation: max(0, rad - dist)
+                collision_violations += np.maximum(0.0, eff_rad - dists)
+
+        # Check Asteroids (Time dependent)
+        if len(self.asteroids) > 0:
+            sat_rad_ast = np.sqrt((self.sg.w_half + self.sg.w_panel) ** 2 + (self.sg.l_f**2))
+            for asteroid in self.asteroids.values():
+                eff_rad = asteroid.radius + sat_rad_ast
+                for k in range(K):
+                    t_real = p[0] * (k / (K - 1)) if K > 1 else 0.0
+                    a_pos = self._get_asteroid_position(asteroid, t_real)
+                    dist = np.linalg.norm(X[:2, k] - a_pos)
+                    collision_violations[k] += max(0.0, eff_rad - dist)
+
+        # C. Fuel Cost (Original Running Cost)
+        fuel_costs = self.params.weight_u * np.sum(U**2, axis=0) # Shape (K,)
+
+        # --- 3. Apply Trapezoidal Integration (Eq 54) ---
+        # Integral = sum( weight_k * value_k ) * dt
+        running_total = 0.0
+        for k in range(K):
+            # Eq 50: Gamma = Cost + lambda*P(defect) + lambda*P(collision)
+            gamma_k = fuel_costs[k] + lambda_val * defects[k] + lambda_val * collision_violations[k]
+            
+            # Eq 54: Weights are 0.5 for endpoints, 1.0 for interior
+            weight = 0.5 if (k == 0 or k == K - 1) else 1.0
+            
+            running_total += weight * gamma_k
+
+        J_val += running_total * dt_norm
+
+        return J_val
 
     def _update_trust_region(self) -> bool:
         """
@@ -711,6 +953,23 @@ class SatellitePlanner:
         self.params.tr_radius = np.clip(self.params.tr_radius, self.params.min_tr_radius, self.params.max_tr_radius)
 
         return accept_step
+
+    def _get_asteroid_position(self, asteroid: AsteroidParams, time: float) -> np.ndarray:
+        """
+        Predicts the center of an asteroid at a given time in the global frame.
+        """
+        orientation = asteroid.orientation
+        velocity_local = np.array(asteroid.velocity)
+
+        # Create rotation matrix to transform from local to global frame
+        c, s = np.cos(orientation), np.sin(orientation)
+        rot_matrix = np.array([[c, -s], [s, c]])
+
+        # Rotate the velocity vector
+        velocity_global = rot_matrix @ velocity_local
+
+        # Predict position: start + v_global * t
+        return np.array(asteroid.start) + velocity_global * time
 
     def _extract_trajectory_from_arrays(
         self, X_bar: NDArray, U_bar: NDArray, p_bar: NDArray

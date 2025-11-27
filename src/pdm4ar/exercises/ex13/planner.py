@@ -28,15 +28,15 @@ class SolverParameters:
     """
 
     # Cvxpy solver parameters
-    solver: str = "ECOS"  # specify solver to use
-    #solver: str = "SCS"
+    # solver: str = "ECOS"  # specify solver to use
+    solver: str = "CLARABEL"
     verbose_solver: bool = False  # if True, the optimization steps are shown
     max_iterations: int = 100  # max algorithm iterations
 
     # SCVX parameters (Add paper reference)
     lambda_nu: float = 1e5  # slack variable weight
-    weight_p: NDArray = field(default_factory=lambda: 10 * np.array([[1.0]]).reshape((1, -1)))  # weight for final time
-    weight_u: float = 100.0  # weight for control inputs
+    weight_p: NDArray = field(default_factory=lambda: 1.0 * np.array([[1.0]]).reshape((1, -1)))  # weight for final time
+    weight_u: float = 1.0  # weight for control inputs
     # weight_d: float = 1.0  # weight for distance (can be used if we implement new objective using also distance)
 
     tr_radius: float = 5  # initial trust region radius
@@ -52,7 +52,7 @@ class SolverParameters:
     K: int = 50  # number of discretization steps
     N_sub: int = 5  # used inside ode solver inside discretization
     stop_crit: float = 1e-5  # Stopping criteria constant
-    relative_stop_crit: float = 1e-2  # Stopping criteria for relative cost improvement
+    relative_stop_crit: float = 5e-3  # Stopping criteria for relative cost improvement
 
 
 @dataclass

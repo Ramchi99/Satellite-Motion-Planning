@@ -165,8 +165,9 @@ class SatelliteAgent(Agent):
         """
         current_state = sim_obs.players[self.myname].state
         self.actual_trajectory.append(current_state)
-        # expected_state = self.state_traj.at_interp(sim_obs.time)
+        expected_state = self.state_traj.at_interp(sim_obs.time)
 
+        """
         # Use relative time for trajectory lookup
         relative_time = sim_obs.time - self.t_replan
         expected_state = self.state_traj.at_interp(relative_time)
@@ -180,12 +181,12 @@ class SatelliteAgent(Agent):
         
         self.time_history.append(sim_obs.time)
         self.error_history.append((diff_x, diff_y, diff_psi))
-
+        """
         # plotting the trajectory every 2.5 sec (this is optional, for better visualization)
         if Config.PLOT and int(10 * sim_obs.time) % 25 == 0:
             plot_traj(self.state_traj, self.actual_trajectory)
             
-        if Config.PLOT and int(10 * sim_obs.time) % 2 == 0:
+        if Config.PLOT and int(10 * sim_obs.time) % 25 == 0:
              self.plot_debug()
 
         # --- CHOOSE REPLANNING STRATEGY ---
@@ -203,7 +204,7 @@ class SatelliteAgent(Agent):
         #     self.cmds_plan, self.state_traj = self.planner.compute_trajectory(current_state, self.goal_state)
         #     self.t_replan = sim_obs.time
         #     relative_time = 0.0
-
+        """
         # --- Strategy 2: Sophisticated Weighted Infinity Norm (Recommended) ---
         # COMMENT OUT THE BLOCK BELOW IF YOU USE STRATEGY 1
         # 1. Calculate deviation using a weighted infinity norm.
@@ -239,16 +240,12 @@ class SatelliteAgent(Agent):
             self.t_replan = sim_obs.time
             relative_time = 0.0 # The new plan starts now, so we are at its t=0
         # --- End of Replanning Implementation ---
-
+        """
         # ZeroOrderHold
         # cmds = self.cmds_plan.at_or_previous(sim_obs.time)
         # FirstOrderHold
-        # cmds = self.cmds_plan.at_interp(sim_obs.time)
+        cmds = self.cmds_plan.at_interp(sim_obs.time)
         # Use relative time for command lookup
-        cmds = self.cmds_plan.at_interp(relative_time)
+        # cmds = self.cmds_plan.at_interp(relative_time)
 
         return cmds
-
-        # return SatelliteCommands(
-        #     F_left=1, F_right=1
-        # )  # can be replaced by SatelliteCommands(F_left=1, F_right=1) if you want to test constant commands

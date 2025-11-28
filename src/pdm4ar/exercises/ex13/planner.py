@@ -35,9 +35,8 @@ class SolverParameters:
 
     # SCVX parameters (Add paper reference)
     lambda_nu: float = 1e5  # slack variable weight
-    weight_p: NDArray = field(default_factory=lambda: 1.0 * np.array([[1.0]]).reshape((1, -1)))  # weight for final time
+    weight_p: NDArray = field(default_factory=lambda: 5.0 * np.array([[1.0]]).reshape((1, -1)))  # weight for final time
     weight_u: float = 1.0  # weight for control inputs
-    # weight_d: float = 1.0  # weight for distance (can be used if we implement new objective using also distance)
 
     tr_radius: float = 5  # initial trust region radius
     min_tr_radius: float = 1e-4  # min trust region radius
@@ -125,6 +124,17 @@ class SatellitePlanner:
     p_bar: NDArray
     
     history: list[SCvxIterationLog]
+    
+    @property
+    def satellite_bounding_radius(self) -> float:
+        """
+        Returns the physical enclosing radius of the satellite plus a consistent safety buffer.
+        """
+        # Physical enclosing radius
+        r_phys = np.sqrt((self.sg.w_half + self.sg.w_panel) ** 2 + (self.sg.l_f**2))
+        # Safety buffer (must be consistent between convexification and merit check!)
+        buffer = 0.1
+        return r_phys + buffer
 
     def __init__(
         self,
@@ -391,17 +401,6 @@ class SatellitePlanner:
         # --- Docking Debug Plot ---
         if isinstance(self.goal, DockingTarget):
             self._debug_plot_docking(self.X_bar, X_init=X_init_guess)
-
-        """
-        self._convexification()
-        try:
-            error = self.problem.solve(verbose=self.params.verbose_solver, solver=self.params.solver)
-        except cvx.SolverError:
-            print(f"SolverError: {self.params.solver} failed to solve the problem.")
-
-        # Example data: sequence from array
-        mycmds, mystates = self._extract_seq_from_array()
-        """
 
         return mycmds, mystates
     
@@ -709,10 +708,6 @@ class SatellitePlanner:
         # Parameter guess (e.g., final time)
         p = np.array([10.0])
 
-        # X = np.zeros((self.satellite.n_x, K))
-        # U = np.zeros((self.satellite.n_u, K))
-        # p = np.zeros((self.satellite.n_p))
-
         return X, U, p
 
     def _set_goal(self):
@@ -840,15 +835,18 @@ class SatellitePlanner:
         
         tr_radius = self.problem_parameters["tr_radius"]
 
+        # TODO
+        satellite_radius = np.sqrt((self.sg.w_half + self.sg.w_panel) ** 2 + (self.sg.l_f**2))
+
         # boundary conditions
         constraints = [
-            #X[:, 0] == init_state,
-            #X[:, -1] == goal_state,
             X[:, 0] + nu_ic == init_state,      # Initial condition with slack
             X[:, -1] + nu_tc == goal_state,     # Terminal condition with slack
             U[:, 0] == np.array([0, 0]),
             U[:, -1] == np.array([0, 0]),
             p[0] >= 0,
+            X[:2, :] >= -11.0 + satellite_radius,  # Ensure position is within bounds
+            X[:2, :] <= 11.0 - satellite_radius,  # Ensure position is within bounds
         ]
 
         # dynamics constraints
@@ -1009,25 +1007,6 @@ class SatellitePlanner:
         # objective = self.params.weight_p @ self.variables["p"] + self.params.weight_u * cvx.sum_squares(
         #     self.variables["U"]
         # )
-        """
-        objective = (
-            self.params.weight_p @ self.variables["p"]
-            + self.params.weight_u * cvx.sum_squares(self.variables["U"])
-            + self.params.lambda_nu * cvx.norm(self.variables["nu"], 1)
-            # + self.params.lambda_nu * cvx.norm(self.variables["nu_tc"], 1)
-            # + self.params.lambda_nu * cvx.norm(self.variables["nu_s_k"], 1)
-        )
-        if len(self.planets) > 0:
-            objective += self.params.lambda_nu * cvx.sum(self.variables["nu_s"])
-
-        if len(self.asteroids) > 0:
-            objective += self.params.lambda_nu * cvx.sum(self.variables["nu_s_asteroids"])
-
-        # We could also include in the cost function the distance of the path (minimize also for the distance)
-        # TODO
-
-        return cvx.Minimize(objective)
-        """
         # Variables
         U = self.variables["U"]
         p = self.variables["p"]
@@ -1109,8 +1088,6 @@ class SatellitePlanner:
         # All of these parameters need to be populated that the solver can check the constraints!
 
         # Populate init_state / goal_state parameter with the fixed problem boundaries
-        # self.problem_parameters["init_state"].value = self.X_bar[:, 0]
-        # self.problem_parameters["goal_state"].value = self.X_bar[:, -1]
         x_init = np.array(
             [
                 self.init_state.x,
@@ -1150,14 +1127,16 @@ class SatellitePlanner:
         # You can comment out the line below to disable the verbose consistency check
         self._debug_check_flow_map_consistency(self.X_bar, self.U_bar, self.p_bar)
 
+        # Centralize satellite_radius calculation for all collision checks
+        satellite_radius = self.satellite_bounding_radius
+
         # Update planet constraint parameters for the current linearization.
         num_planets = len(self.planets)
         if num_planets > 0:
             # --- Configuration Space Expansion ---
             # To ensure the entire satellite body avoids the planets, we "grow" the
-            # planet's radius by the satellite's enclosing radius. We calculate this
-            # from the corner of the satellite's bounding box using the user-provided formula.
-            satellite_radius = np.sqrt((self.sg.w_half + self.sg.w_panel) ** 2 + (self.sg.l_f**2)) + 0.5
+            # planet's radius by the satellite's enclosing radius.
+            # (satellite_radius is already defined above)
 
             # These parameters are flattened, where 'idx' = planet_idx * K + time_step_k.
             planet_C_val = np.zeros((num_planets * self.params.K, 2))
@@ -1190,8 +1169,7 @@ class SatellitePlanner:
         # Update asteroid constraint parameters for the current linearization.
         num_asteroids = len(self.asteroids)
         if num_asteroids > 0:
-            # Satellite radius is already calculated above for planets --> only if planets exist!
-            satellite_radius = np.sqrt((self.sg.w_half + self.sg.w_panel) ** 2 + (self.sg.l_f**2))
+            # (satellite_radius is already defined above)
 
             asteroid_C_val = np.zeros((num_asteroids * self.params.K, 2))
             asteroid_r_prime_val = np.zeros(num_asteroids * self.params.K)
@@ -1234,7 +1212,7 @@ class SatellitePlanner:
              p_radius = np.linalg.norm(A1 - A2) / 2
              
              # Satellite Radius
-             satellite_radius = np.sqrt((self.sg.w_half + self.sg.w_panel) ** 2 + (self.sg.l_f**2)) + 0.5
+             # (satellite_radius is already defined above)
              effective_radius = p_radius + satellite_radius
              
              # Parameters
@@ -1247,7 +1225,7 @@ class SatellitePlanner:
                  # C_k = -2 * (x_bar_k - p_center)
                  vp_C_val[k, :] = -2 * (x_bar_k - p_center)
                  
-                 # r'_k = r_eff^2 - ||diff||^2 + 2 * diff^T * x_bar
+                 # r'_k = r_eff^2 - ||diff||^2 + 2 * diff @ x_bar
                  diff = x_bar_k - p_center
                  vp_r_val[k] = effective_radius**2 - np.sum(diff**2) + 2 * diff @ x_bar_k
                  
@@ -1258,33 +1236,6 @@ class SatellitePlanner:
         """
         Check convergence of SCvx.
         """
-        """
-        # I'm implementing the changing of cost improvement as a stopping criterion.
-        # But we can and should also try other stopping criterions (see slides of excercise)
-
-        # Calculate the non-linear cost of the previous trajectory guess (J_old)
-        J_old = self.params.weight_p @ self.p_bar + self.params.weight_u * np.sum(self.U_bar**2)
-
-        # Get the predicted cost of the new solution from the linearized problem (L_new)
-        L_new = self.problem.value
-
-        # Check if the predicted improvement is less than or equal to the stopping criterion
-        predicted_improvement = J_old - L_new
-        return predicted_improvement <= self.params.stop_crit
-        """
-        """
-        nu_norm = np.linalg.norm(self.variables["nu"].value)
-        # nu_tc_norm = np.linalg.norm(self.variables["nu_tc"].value)
-        # nu_s_k_norm = np.linalg.norm(self.variables["nu_s_k"].value)
-        # total_slack = nu_norm + nu_tc_norm + nu_s_k_norm
-        total_slack = nu_norm
-
-        converged = total_slack < self.params.stop_crit
-        print(f"  Total slack: {total_slack:.6e} (threshold: {self.params.stop_crit:.6e})")
-
-        # return converged
-        """
-
         # Criterion 1: Trajectory change
         X_star = self.variables["X"].value
         p_star = self.variables["p"].value
@@ -1327,24 +1278,6 @@ class SatellitePlanner:
         Calculates the nonlinear merit function Jλ(x,u,p) using a sequential defect calculation
         as described in the SCvx paper (Fig. 15).  ---  𝛿_k = x_{k+1} - 𝜓(⋅)  ---
         """
-        """
-        # J(cost): Time and fuel objective
-        cost = (self.params.weight_p @ p).item() + self.params.weight_u * np.sum(U**2)
-
-        # Simulate the nonlinear dynamics piecewise, starting from each X[:,k]
-        # This gives us X_nl_piecewise[:, k+1] = phi(X[:, k], U[:, k], U[:, k+1], p)
-        X_nl_piecewise = self.integrator.integrate_nonlinear_piecewise(X, U, p)
-
-        # Defect calculation
-        # The defect at each step is the difference between the solver's proposed next state
-        # and the actual next state if we integrate one step from the solver's current state.
-        # Sum the L1 norm of these defects.
-        total_defect = np.sum(np.abs(X[:, 1:] - X_nl_piecewise[:, 1:]))
-
-        # Total merit Jλ
-        merit = cost + self.params.lambda_nu * total_defect
-        return merit
-        """
         K = self.params.K
         # Normalized time step dt for the interval [0, 1]
         dt_norm = 1.0 / (K - 1)
@@ -1376,30 +1309,31 @@ class SatellitePlanner:
         # We calculate the sum of violations for all planets/asteroids at each step k
         collision_violations = np.zeros(K)
         
-        # Satellite radius helper
-        sat_rad = np.sqrt((self.sg.w_half + self.sg.w_panel) ** 2 + (self.sg.l_f**2)) + 0.5
+        # Centralized satellite radius for merit calculation
+        sat_rad = self.satellite_bounding_radius
 
         # Check Planets
         if len(self.planets) > 0:
             for planet in self.planets.values():
                 p_center = np.array(planet.center)
                 eff_rad = planet.radius + sat_rad
-                dists = np.linalg.norm(X[:2, :] - p_center.reshape(-1,1), axis=0)
-                # Constraint: dist >= rad  -->  Violation: max(0, rad - dist)
+                dists_sq = np.sum((X[:2, :] - p_center.reshape(-1,1))**2, axis=0)
+                # Constraint: dist >= rad  -->  Violation: max(0, rad^2 - dist^2)
                 # FIX: Use squared distance to match solver's linearized constraint units
-                collision_violations += np.maximum(0.0, eff_rad**2 - dists**2)
+                collision_violations += np.maximum(0.0, eff_rad**2 - dists_sq)
 
         # Check Asteroids (Time dependent)
         if len(self.asteroids) > 0:
-            sat_rad_ast = np.sqrt((self.sg.w_half + self.sg.w_panel) ** 2 + (self.sg.l_f**2))
+            # Use the SAME radius (previously you had no buffer here)
+            # sat_rad_ast is not needed, use sat_rad directly
             for asteroid in self.asteroids.values():
-                eff_rad = asteroid.radius + sat_rad_ast
+                eff_rad = asteroid.radius + sat_rad
                 for k in range(K):
                     t_real = p[0] * (k / (K - 1)) if K > 1 else 0.0
                     a_pos = self._get_asteroid_position(asteroid, t_real)
-                    dist = np.linalg.norm(X[:2, k] - a_pos)
+                    dist_sq = np.sum((X[:2, k] - a_pos)**2)
                     # FIX: Use squared distance here too
-                    collision_violations[k] += max(0.0, eff_rad**2 - dist**2)
+                    collision_violations[k] += max(0.0, eff_rad**2 - dist_sq)
 
         if isinstance(self.goal, DockingTarget):
              # Virtual Planet Violation
@@ -1407,8 +1341,8 @@ class SatellitePlanner:
              p_center = (A1 + A2) / 2
              p_radius = np.linalg.norm(A1 - A2) / 2
              
-             satellite_radius = np.sqrt((self.sg.w_half + self.sg.w_panel) ** 2 + (self.sg.l_f**2)) + 0.5
-             effective_radius = p_radius + satellite_radius
+             # satellite_radius is not needed, use sat_rad directly
+             effective_radius = p_radius + sat_rad
              
              for k in range(K - 7):
                  dist_sq = np.sum((X[:2, k] - p_center)**2)
@@ -1458,9 +1392,6 @@ class SatellitePlanner:
 
         # Actual improvement = Jλ(bar) - Jλ(star)
         actual_improvement = merit_old - merit_new
-
-        # You can comment out the line below to disable the trust region update print
-        # self._debug_print_trust_region_update(merit_old, merit_new, L_new, actual_improvement, predicted_improvement)
 
         # Avoid division by zero; if predicted improvement is not positive, the step is bad.
         if predicted_improvement <= 1e-9:  # Use a small tolerance
@@ -1536,106 +1467,6 @@ class SatellitePlanner:
         states = [SatelliteState(*X_bar[:, i]) for i in range(K)]
         mystates = DgSampledSequence[SatelliteState](timestamps=timestamps, values=states)
         return mycmds, mystates
-
-    @staticmethod
-    def _extract_seq_from_array() -> tuple[DgSampledSequence[SatelliteCommands], DgSampledSequence[SatelliteState]]:
-        """
-        Example of how to create a DgSampledSequence from numpy arrays and timestamps.
-        """
-        ts = (0, 1, 2, 3, 4)
-        # in case my planner returns 3 numpy arrays
-        F = np.array([0, 1, 2, 3, 4])
-        ddelta = np.array([0, 0, 0, 0, 0])
-        cmds_list = [SatelliteCommands(f, dd) for f, dd in zip(F, ddelta)]
-        mycmds = DgSampledSequence[SatelliteCommands](timestamps=ts, values=cmds_list)
-
-        # in case my state trajectory is in a 2d array
-        npstates = np.random.rand(len(ts), 6)
-        states = [SatelliteState(*v) for v in npstates]
-        mystates = DgSampledSequence[SatelliteState](timestamps=ts, values=states)
-        return mycmds, mystates
-
-    def _debug_print_defect_comparison(self):
-        """
-        Helper method to print a detailed comparison of defects and virtual controls.
-        """
-        X_bar, U_bar, p_bar = self.X_bar, self.U_bar, self.p_bar
-        X_star, U_star, p_star = self.variables["X"].value, self.variables["U"].value, self.variables["p"].value
-        nu_val = self.variables["nu"].value
-        K = self.params.K
-
-        # --- Defect of X_bar ---
-        # Method 1: Using the nonlinear integrator `ψ`.
-        X_nl_bar = self.integrator.integrate_nonlinear_piecewise(X_bar, U_bar, p_bar)
-        defect_X_bar_nonlinear = X_bar[:, 1:] - X_nl_bar[:, 1:]
-
-        # Method 2: Using the linearization from _convexification (A_bar, r_bar, etc.).
-        defect_X_bar_linear = np.zeros((self.satellite.n_x, K - 1))
-        for k in range(K - 1):
-            A_k = cvx.reshape(
-                self.problem_parameters["A_bar"][:, k], (self.satellite.n_x, self.satellite.n_x), order="F"
-            ).value
-            Bp_k = cvx.reshape(
-                self.problem_parameters["B_plus_bar"][:, k], (self.satellite.n_x, self.satellite.n_u), order="F"
-            ).value
-            Bm_k = cvx.reshape(
-                self.problem_parameters["B_minus_bar"][:, k], (self.satellite.n_x, self.satellite.n_u), order="F"
-            ).value
-            F_k = cvx.reshape(
-                self.problem_parameters["F_bar"][:, k], (self.satellite.n_x, self.satellite.n_p), order="F"
-            ).value
-            r_k = self.problem_parameters["r_bar"][:, k].value
-            x_kp1_linearized = A_k @ X_bar[:, k] + Bp_k @ U_bar[:, k + 1] + Bm_k @ U_bar[:, k] + F_k @ p_bar + r_k
-            defect_X_bar_linear[:, k] = X_bar[:, k + 1] - x_kp1_linearized
-
-        # --- Defect of X_star ---
-        X_nl_star = self.integrator.integrate_nonlinear_piecewise(X_star, U_star, p_star)
-        defect_X_star_nonlinear = X_star[:, 1:] - X_nl_star[:, 1:]
-
-        print("\n[DEBUG] Defect and Virtual Control Comparison:")
-        print("  -- For Reference Trajectory (X_bar) --")
-        print(f"  ||defect(X_bar)|| [via nonlinear integrator]: {np.linalg.norm(defect_X_bar_nonlinear):.4e}")
-        print(f"  ||defect(X_bar)|| [via linear approx]:       {np.linalg.norm(defect_X_bar_linear):.4e}")
-        print(f"  --> Difference: {np.linalg.norm(defect_X_bar_nonlinear - defect_X_bar_linear):.4e}")
-        print("\n  -- For Candidate Trajectory (X_star) --")
-        print(f"  ||nu(X_star)||      [Virtual Control]:      {np.linalg.norm(nu_val):.4e}")
-        print(f"  ||defect(X_star)||    [True Nonlinear Error]: {np.linalg.norm(defect_X_star_nonlinear):.4e}")
-
-    def _debug_print_iteration_summary(self, i: int):
-        """
-        Helper method to print a summary of the current solver iteration.
-        """
-        if self.problem.status == "optimal":
-            print(f"\n=== Iteration {i} ===")
-            print(f"Total objective: {self.problem.value:.6e}")
-
-            # Break down which slack is the problem
-            nu = self.variables["nu"].value
-            print(f"Slack breakdown:")
-            print(f"  nu (dynamics): {np.linalg.norm(nu):.6e}, max: {np.max(np.abs(nu)):.6e}")
-
-            # Check if we're at the boundaries
-            X_new = self.variables["X"].value
-            p_new = self.variables["p"].value
-            print(f"Solution stats:")
-            print(f"  p (time): {p_new[0]:.4f}")
-            print(
-                f"  U min/max: [{np.min(self.variables['U'].value):.4f}, {np.max(self.variables['U'].value):.4f}] (limits: [0, {self.sp.F_limits[1]}])"
-            )
-            print(f"  X[:,0] error: {np.linalg.norm(X_new[:,0] - self.problem_parameters['init_state'].value):.6e}")
-            print(f"  X[:,-1] error: {np.linalg.norm(X_new[:,-1] - self.problem_parameters['goal_state'].value):.6e}")
-            print(f"  Trust region: {self.params.tr_radius:.4f}")
-
-    def _debug_print_trust_region_update(self, merit_old, merit_new, L_new, actual_improvement, predicted_improvement):
-        """
-        Helper method to print the details of the trust region update calculation.
-        """
-        # Use .item() to extract the scalar value from 1-element numpy arrays
-        print("Trust region update:")
-        print(f"  merit_old: {merit_old.item():.6e}, merit_new: {merit_new.item():.6e}, L_new: {L_new:.6e}")
-        print(
-            f"  actual_improvement: {actual_improvement.item():.6e}, predicted_improvement: {predicted_improvement.item():.6e}"
-        )
 
     def _debug_check_flow_map_consistency(self, X_bar: NDArray, U_bar: NDArray, p_bar: NDArray):
         """

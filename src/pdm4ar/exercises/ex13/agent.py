@@ -83,7 +83,10 @@ class SatelliteAgent(Agent):
         self.myname = init_sim_obs.my_name
         self.sg = init_sim_obs.model_geometry
         self.sp = init_sim_obs.model_params
-        self.planner = SatellitePlanner(planets=self.planets, asteroids=self.asteroids, sg=self.sg, sp=self.sp)
+        # self.planner = SatellitePlanner(planets=self.planets, asteroids=self.asteroids, sg=self.sg, sp=self.sp)
+        self.planner = SatellitePlanner(
+            planets=self.planets, asteroids=self.asteroids, sg=self.sg, sp=self.sp, goal=init_sim_obs.goal
+        )
         assert isinstance(init_sim_obs.goal, SpaceshipTarget | DockingTarget)
         # make sure you consider both types of goals accordingly
         # (Docking is a subclass of SpaceshipTarget and may require special handling

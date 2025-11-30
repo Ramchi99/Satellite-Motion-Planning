@@ -2,6 +2,8 @@ import sympy as spy
 
 from dg_commons.sim.models.satellite_structures import SatelliteGeometry, SatelliteParameters
 
+import numpy as np
+
 
 class SatelliteDyn:
     sg: SatelliteGeometry
@@ -32,6 +34,16 @@ class SatelliteDyn:
         self.n_u = self.u.shape[0]  # number of inputs
         self.n_p = self.p.shape[0]
 
+        self.buff = 1.0 * np.sqrt(
+            max(
+                self.sg.l_r**2 + (self.sg.w_panel + self.sg.w_half) ** 2,
+                self.sg.l_f**2 + (self.sg.w_panel + self.sg.w_half) ** 2,
+                (self.sg.l_f + self.sg.l_c) ** 2,
+            )
+        )
+
+        self.F_max = max(self.sp.F_limits)
+
     def get_dynamics(self) -> tuple[spy.Function, spy.Function, spy.Function, spy.Function]:
         """
         Define dynamics and extract jacobians.
@@ -39,9 +51,8 @@ class SatelliteDyn:
         extract the state from self.x the following way:
         0x 1y 2psi 3vx 4vy 5dpsi
         """
-        # TODO Modify dynamics
 
-        _x, _y, psi, vx, vy, dpsi = self.x
+        _, _, psi, vx, vy, dpsi = self.x
         thrust_l, thrust_r = self.u
         t_f = self.p
 

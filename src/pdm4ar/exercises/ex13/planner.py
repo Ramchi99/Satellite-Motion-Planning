@@ -182,6 +182,7 @@ class SatellitePlanner:
         self.p_bar = self.variables["p"].value
 
         for i in range(self.params.max_iterations):
+            print(i)
             if self.tr_radius < self.params.min_tr_radius:
                 break
 

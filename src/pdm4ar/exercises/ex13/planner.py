@@ -42,7 +42,7 @@ class SolverParameters:
     weight_U = 1.0
 
     tr_radius: float = 5  # initial trust region radius
-    tr_weights = {"X": 1, "U": 1, "p": 1}
+    tr_weights = {"X": 1, "U": 1, "p": 0.2}
     min_tr_radius: float = 1e-4  # min trust region radius
     max_tr_radius: float = 100  # max trust region radius
     rho_0: float = 0.0  # trust region 0
@@ -252,7 +252,7 @@ class SatellitePlanner:
 
         m = self.satellite.sp.m_v
         F_max = self.satellite.F_max
-        t_f_guess = 3 * np.sqrt(m * norm(X0[:2] - Xf[:2]) / F_max)
+        t_f_guess = 4 * np.sqrt(m * norm(X0[:2] - Xf[:2]) / F_max)
         p = np.array([t_f_guess])
 
         return X, U, p
@@ -378,12 +378,12 @@ class SatellitePlanner:
         F_max = self.satellite.sp.F_limits[1]
         D_max = self.params.map_characteristic_dimension - buff
         constraints.extend([cvx.norm(U[:, k], "inf") <= F_max for k in range(K)])
-        # constraints.extend(
-        #     [
-        #         cvx.norm(X[:2, k], "inf") <= D_max
-        #         for k in range(self.params.map_edge_constr_activation_time, self.params.dock_constr_activation_time)
-        #     ]
-        # )
+        constraints.extend(
+            [
+                cvx.norm(X[:2, k], "inf") <= D_max
+                for k in range(self.params.map_edge_constr_activation_time, self.params.dock_constr_activation_time)
+            ]
+        )
 
         # nonconvex path constraints
         if self.obstacles:

@@ -47,7 +47,7 @@ class SolverParameters:
     max_tr_radius: float = 100  # max trust region radius
     rho_0: float = 0.0  # trust region 0
     rho_1: float = 0.25  # trust region 1
-    rho_2: float = 0.8  # trust region 2
+    rho_2: float = 0.9  # trust region 2
     alpha: float = 2.0  # div factor trust region update
     beta: float = 3.2  # mult factor trust region update
 
@@ -379,9 +379,9 @@ class SatellitePlanner:
         F_max = self.satellite.sp.F_limits[1]
         D_max = self.params.map_characteristic_dimension - buff
         constraints.extend([cvx.norm(U[:, k], "inf") <= F_max for k in range(K)])
-        constraints.extend(
-            [cvx.norm(X[:2, k], "inf") <= D_max for k in range(self.params.map_edge_constr_activation_time, K)]
-        )
+        # constraints.extend(
+        #     [cvx.norm(X[:2, k], "inf") <= D_max for k in range(self.params.map_edge_constr_activation_time, K)]
+        # )
 
         # nonconvex path constraints
         if self.obstacles:
@@ -433,7 +433,7 @@ class SatellitePlanner:
                 _halfplane_constraint(A, B, A1, range_dock_constr),
                 _halfplane_constraint(A, C, A2, range_dock_constr),
                 # "be in fron of the dock before docking" constraint
-                _halfplane_constraint(B, C, A, [dock_constr_activation_time - 1]),
+                # _halfplane_constraint(B, C, A, [dock_constr_activation_time - 1]),
             ]
 
             for constraint in constraint_lists:

@@ -20,6 +20,8 @@ from pdm4ar.exercises.ex13.discretization import *
 from pdm4ar.exercises_def.ex11.goal import DockingTarget
 from pdm4ar.exercises_def.ex13.utils_params import PlanetParams, AsteroidParams
 
+from pdm4ar.exercises_def.ex13.goal import DockingTarget
+
 
 @dataclass(frozen=True)
 class SolverParameters:
@@ -34,18 +36,18 @@ class SolverParameters:
     max_iterations: int = 100  # max algorithm iterations
 
     # SCVX parameters (Add paper reference)
-    lambda_nu: float = 1e5  # slack variable wgit reset --hardeight
+    lambda_nu: float = 1e6  # slack variable weight
     # weight_p: NDArray = field(default_factory=lambda: 10 * np.array([[1.0]]).reshape((1, -1)))  # weight for final time
     weight_p = 10.0
     weight_U = 1.0
 
     tr_radius: float = 5  # initial trust region radius
     tr_weights = {"X": 1, "U": 1, "p": 1}
-    min_tr_radius: float = 1e-5  # min trust region radius
+    min_tr_radius: float = 1e-4  # min trust region radius
     max_tr_radius: float = 100  # max trust region radius
     rho_0: float = 0.0  # trust region 0
     rho_1: float = 0.25  # trust region 1
-    rho_2: float = 0.9  # trust region 2
+    rho_2: float = 0.8  # trust region 2
     alpha: float = 2.0  # div factor trust region update
     beta: float = 3.2  # mult factor trust region update
 
@@ -170,10 +172,19 @@ class SatellitePlanner:
 
         self.init_state = init_state
         self.goal_state = goal_state
+
+        # accept the first iteration by default
         self.X_bar, self.U_bar, self.p_bar = self.initial_guess()
+        self._convexification()
+        self.problem.solve(verbose=self.params.verbose_solver, solver=self.params.solver)
+        self.X_bar = self.variables["X"].value
+        self.U_bar = self.variables["U"].value
+        self.p_bar = self.variables["p"].value
 
         for i in range(self.params.max_iterations):
+            print(i)
             if self.tr_radius < self.params.min_tr_radius:
+                print("tr_radius bounds exceeded")
                 break
 
             # Linearize the system about the reference trajectory
@@ -195,25 +206,20 @@ class SatellitePlanner:
             p_star = self.variables["p"].value
             J_star = self.nonlinear_convex_cost(X_star, U_star, p_star)
 
-            print(i, self.J_bar, J_star, L_star)
-
             # Check convergence
             eps = self.params.stop_crit
             max_state_change_conv_crit = norm(p_star - self.p_bar) + norm(X_star - self.X_bar, 1) < eps
 
             dJ_predicted = self.J_bar - L_star
 
-            cost_improvement_conv_crit = True
-            if dJ_predicted < eps:
-                cost_improvement_conv_crit = dJ_predicted < self.params.eps_r * abs(self.J_bar)
-            # cost_improvement_conv_crit = (
-            #     True if dJ_predicted < eps else dJ_predicted < self.params.eps_r * abs(self.J_bar)
-            # )
+            cost_improvement_conv_crit = (
+                True if dJ_predicted < eps else dJ_predicted < self.params.eps_r * abs(self.J_bar)
+            )
 
             converged = max_state_change_conv_crit or cost_improvement_conv_crit
 
             # Update trust region and accept or reject the solution
-            accepted = self._update_trust_region(self.J_bar, J_star, L_star) or i == 0
+            accepted = self._update_trust_region(self.J_bar, J_star, L_star)
 
             if accepted:
                 self.X_bar = X_star
@@ -416,16 +422,18 @@ class SatellitePlanner:
             # returns the constraint of a halfplane defined by points P1 and P2.
             # The direction of the halfplane is given by P_ref (i.e. P_ref lies *within* the halfplane)
             # and the constraint forces X to be *outside* of the halfplane
-            def _halfplane_constraint(P1, P2, P_ref, rng, buff=0):
+            def _halfplane_constraint(P1, P2, P_ref, rng):
                 if np.cross(P_ref - P1, P2 - P1) > 0:
-                    return [_cvx_cross2d(X[:2, k] - P1, P2 - P1) + buff <= 0 for k in rng]
+                    return [_cvx_cross2d(X[:2, k] - P1, P2 - P1) <= 0 for k in rng]
                 else:
-                    return [_cvx_cross2d(X[:2, k] - P1, P2 - P1) - buff >= 0 for k in rng]
+                    return [_cvx_cross2d(X[:2, k] - P1, P2 - P1) >= 0 for k in rng]
 
             constraint_lists = [
                 # cone constraint
                 _halfplane_constraint(A, B, A1, range_dock_constr),
                 _halfplane_constraint(A, C, A2, range_dock_constr),
+                # "be in fron of the dock before docking" constraint
+                _halfplane_constraint(B, C, A, [dock_constr_activation_time - 1]),
             ]
 
             for constraint in constraint_lists:
@@ -512,6 +520,8 @@ class SatellitePlanner:
             self.tr_radius /= self.params.alpha
         elif rho >= self.params.rho_2:
             self.tr_radius *= self.params.beta
+
+        print(rho)
 
         return accepted
 

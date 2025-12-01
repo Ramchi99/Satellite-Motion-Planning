@@ -38,7 +38,7 @@ class SolverParameters:
     # SCVX parameters (Add paper reference)
     lambda_nu: float = 1e6  # slack variable weight
     # weight_p: NDArray = field(default_factory=lambda: 10 * np.array([[1.0]]).reshape((1, -1)))  # weight for final time
-    weight_p = 1.0
+    weight_p = 10.0
     weight_U = 1.0
 
     tr_radius: float = 5  # initial trust region radius

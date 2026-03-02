@@ -1,0 +1,330 @@
+
+<html>
+<head>
+    <meta charset="utf-8" />
+    <script type="text/javascript"
+        src="index.html_resources/static/jquery/jquery.js"></script>
+
+    <!-- Use imagezoom plugin -->
+    <script type="text/javascript"
+        src="index.html_resources/static/jquery/jquery.imageZoom.js"></script>
+    <link rel="stylesheet"
+          href="index.html_resources/static/jquery/jquery.imageZoom.css"/>
+    <script type="text/javascript">
+        $(document).ready( function () {
+            $('.zoomable').imageZoom();
+        });
+    </script>
+
+
+    <!-- Use tablesorter plugin -->
+    <script type="text/javascript"
+            src="index.html_resources/static/jquery/tablesorter/jquery.tablesorter.js"></script>
+    <link rel="stylesheet"
+          href="index.html_resources/static/jquery/tablesorter/themes/blue/style.css"/>
+    <script type="text/javascript">
+    $(document).ready(function() {
+        $(".tablesorter").tablesorter();
+    }
+    );
+    </script>
+    
+
+    <script type="text/x-mathjax-config">
+      MathJax.Hub.Config({
+        TeX: {
+            equationNumbers: { autoNumber: "AMS" },
+            extensions: ["AMSmath.js", "AMSsymbols.js"]
+        },
+        extensions: ["tex2jax.js"],
+        jax: ["input/TeX", "output/SVG"], //" "output/HTML-CSS"],
+        tex2jax: {
+          inlineMath: [ ['$','$']],
+          displayMath: [ ['$$','$$'] ],
+          processEscapes: true
+        },
+        "HTML-CSS": { availableFonts: ["TeX"] }
+      });
+      //MathJax.Ajax.loadComplete("/media/tex/symbols.js");
+    </script>
+
+    <script type='text/javascript'
+            src='http://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML'></script>
+
+
+
+
+    <style type="text/css">
+    /* Extra CSS passed by user. */
+        
+    </style>
+
+
+    <link rel="stylesheet"
+          href="index.html_resources/static/reprep/default_style.css"/>
+
+    <title> Evaluation </title>
+<body>
+
+<p id="reprep-head">
+    Report created on 2025-12-02-22:07:07
+    by <a href="http://purl.org/censi/2010/RepRep">RepRep</a>.
+    Show:
+    <input type="submit" name="datanode_toggle"
+           value="data nodes" id="datanode_toggle" />
+</p>
+
+
+
+<script type="text/javascript">
+ $(document).ready(function() {
+   $('.datanode').hide();
+   $('#datanode_toggle').click(function(){
+     $('.datanode').toggle();
+   });
+ });
+</script>
+
+
+
+    <div class='report-node' id="Evaluation">
+    <h><a href="#Evaluation">Evaluation</a></h><section> 
+<div class="report-nongui-nodes">
+
+            <div class="textnode report-text-node">
+
+                <span class="textid report-text-node-id"> Evaluated </span>
+
+               <div class="report-text-node-content">
+                 <pre class="report-text report-text-plain">Test cases completion ratio:
+	(3/3)</pre>
+               </div>
+
+            </div>
+            
+            <div class="textnode report-text-node">
+
+                <span class="textid report-text-node-id"> OverallPerformance </span>
+
+               <div class="report-text-node-content">
+                 <pre class="report-text report-text-plain">AggregatedPerformanceRes(n_test_cases=3,
+                         n_completed_test_cases=3,
+                         exceptions=[],
+                         failed_test_id=[],
+                         perf_res={&apos;Average&apos;: 902.1578872382106,
+                                   &apos;Per Scenario&apos;: {&apos;config_1_public&apos;: 921.0469239723818,
+                                                    &apos;config_2_public&apos;: 891.3700222134412,
+                                                    &apos;config_3_public&apos;: 894.0567155288087}})</pre>
+               </div>
+
+            </div>
+            
+    <div class='report-node' id="Evaluation-Final25-config_1_public">
+    <h><a href="#Evaluation-Final25-config_1_public">Final25-config_1_public</a></h><section> 
+<div class="report-nongui-nodes">
+
+            <div class="textnode report-text-node">
+
+                <span class="textid report-text-node-id"> EpisodeEvaluation: </span>
+
+               <div class="report-text-node-content">
+                 <pre class="report-text report-text-plain">EpisodeOutcome(
+	goal_success_rate   =	 1.00,
+	collision_rate      =	 0.00,
+	avg_distance_travelled=	17.17,
+	avg_episode_duration=	 8.97,
+	avg_distance2goal   =	 0.38,
+	avg_actuation_effort=	 1.28,
+	avg_computation_time=	 0.00,
+
+)</pre>
+               </div>
+
+            </div>
+            
+            <div class="textnode report-text-node">
+
+                <span class="textid report-text-node-id"> OverallScore:  </span>
+
+               <div class="report-text-node-content">
+                 <pre class="report-text report-text-plain">921.05</pre>
+               </div>
+
+            </div>
+            
+    <div class='report-node' id="Evaluation-Final25-config_1_public-EpisodeVisualisation">
+    <h><a href="#Evaluation-Final25-config_1_public-EpisodeVisualisation">EpisodeVisualisation</a></h><section> 
+<div class="report-nongui-nodes">
+<div style="clear:left" class='report-figure None' id='Evaluation-Final25-config_1_public-EpisodeVisualisation-figure1'>
+    <p class="report-figure-caption"></p><div class="report-nongui-nodes">
+<p class="datanode"><a href="index.html_resources/Evaluation-Final25-config-1-public-EpisodeVisualisation-figure1-Animation.mp4">Animation</a>:  video/mp4</p>
+</div>
+</div>
+    <div class='report-node' id="Evaluation-Final25-config_1_public-EpisodeVisualisation-Player-PDM4ARSpaceship-log">
+    <h><a href="#Evaluation-Final25-config_1_public-EpisodeVisualisation-Player-PDM4ARSpaceship-log">Player-PDM4ARSpaceship-log</a></h><section> 
+<div class="report-nongui-nodes">
+<p class="datanode"><a href="index.html_resources/Evaluation-Final25-config-1-public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-PDM4ARSpaceship-log.pdf">PDM4ARSpaceship-log</a>:  application/pdf</p>
+<div class="datanode-children">
+<div class="report-nongui-nodes">
+<p class="datanode"><a href="index.html_resources/Evaluation-Final25-config-1-public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-PDM4ARSpaceship-log.png">png</a>:  image/png</p>
+</div>
+</div>
+<div style="clear:left" class='report-figure None' id='Evaluation-Final25-config_1_public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-figure1'>
+    <div class="report-subfigure ncols-1 first-col last-col"> 
+                    <a href="index.html_resources/Evaluation-Final25-config-1-public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-PDM4ARSpaceship-log.png" class="zoomable">
+                        <img src="index.html_resources/Evaluation-Final25-config-1-public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-PDM4ARSpaceship-log.png"/>
+                    </a>
+                <p class="report-subfigure-caption">PDM4ARSpaceship-log</p><p class="report-subfigure-main-link"><a href="index.html_resources/Evaluation-Final25-config-1-public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-PDM4ARSpaceship-log.pdf"> main </a></p></div> 
+
+<p class="report-figure-caption"></p></div></div>
+</section> 
+</div> 
+</div>
+</section> 
+</div> 
+</div>
+</section> 
+</div> 
+
+    <div class='report-node' id="Evaluation-Final25-config_2_public">
+    <h><a href="#Evaluation-Final25-config_2_public">Final25-config_2_public</a></h><section> 
+<div class="report-nongui-nodes">
+
+            <div class="textnode report-text-node">
+
+                <span class="textid report-text-node-id"> EpisodeEvaluation: </span>
+
+               <div class="report-text-node-content">
+                 <pre class="report-text report-text-plain">EpisodeOutcome(
+	goal_success_rate   =	 1.00,
+	collision_rate      =	 0.00,
+	avg_distance_travelled=	26.65,
+	avg_episode_duration=	11.58,
+	avg_distance2goal   =	 0.12,
+	avg_actuation_effort=	 1.61,
+	avg_computation_time=	 0.00,
+
+)</pre>
+               </div>
+
+            </div>
+            
+            <div class="textnode report-text-node">
+
+                <span class="textid report-text-node-id"> OverallScore:  </span>
+
+               <div class="report-text-node-content">
+                 <pre class="report-text report-text-plain">891.37</pre>
+               </div>
+
+            </div>
+            
+    <div class='report-node' id="Evaluation-Final25-config_2_public-EpisodeVisualisation">
+    <h><a href="#Evaluation-Final25-config_2_public-EpisodeVisualisation">EpisodeVisualisation</a></h><section> 
+<div class="report-nongui-nodes">
+<div style="clear:left" class='report-figure None' id='Evaluation-Final25-config_2_public-EpisodeVisualisation-figure1'>
+    <p class="report-figure-caption"></p><div class="report-nongui-nodes">
+<p class="datanode"><a href="index.html_resources/Evaluation-Final25-config-2-public-EpisodeVisualisation-figure1-Animation.mp4">Animation</a>:  video/mp4</p>
+</div>
+</div>
+    <div class='report-node' id="Evaluation-Final25-config_2_public-EpisodeVisualisation-Player-PDM4ARSpaceship-log">
+    <h><a href="#Evaluation-Final25-config_2_public-EpisodeVisualisation-Player-PDM4ARSpaceship-log">Player-PDM4ARSpaceship-log</a></h><section> 
+<div class="report-nongui-nodes">
+<p class="datanode"><a href="index.html_resources/Evaluation-Final25-config-2-public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-PDM4ARSpaceship-log.pdf">PDM4ARSpaceship-log</a>:  application/pdf</p>
+<div class="datanode-children">
+<div class="report-nongui-nodes">
+<p class="datanode"><a href="index.html_resources/Evaluation-Final25-config-2-public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-PDM4ARSpaceship-log.png">png</a>:  image/png</p>
+</div>
+</div>
+<div style="clear:left" class='report-figure None' id='Evaluation-Final25-config_2_public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-figure1'>
+    <div class="report-subfigure ncols-1 first-col last-col"> 
+                    <a href="index.html_resources/Evaluation-Final25-config-2-public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-PDM4ARSpaceship-log.png" class="zoomable">
+                        <img src="index.html_resources/Evaluation-Final25-config-2-public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-PDM4ARSpaceship-log.png"/>
+                    </a>
+                <p class="report-subfigure-caption">PDM4ARSpaceship-log</p><p class="report-subfigure-main-link"><a href="index.html_resources/Evaluation-Final25-config-2-public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-PDM4ARSpaceship-log.pdf"> main </a></p></div> 
+
+<p class="report-figure-caption"></p></div></div>
+</section> 
+</div> 
+</div>
+</section> 
+</div> 
+</div>
+</section> 
+</div> 
+
+    <div class='report-node' id="Evaluation-Final25-config_3_public">
+    <h><a href="#Evaluation-Final25-config_3_public">Final25-config_3_public</a></h><section> 
+<div class="report-nongui-nodes">
+
+            <div class="textnode report-text-node">
+
+                <span class="textid report-text-node-id"> EpisodeEvaluation: </span>
+
+               <div class="report-text-node-content">
+                 <pre class="report-text report-text-plain">EpisodeOutcome(
+	goal_success_rate   =	 1.00,
+	collision_rate      =	 0.00,
+	avg_distance_travelled=	24.11,
+	avg_episode_duration=	12.35,
+	avg_distance2goal   =	 0.09,
+	avg_actuation_effort=	 1.61,
+	avg_computation_time=	 0.00,
+
+)</pre>
+               </div>
+
+            </div>
+            
+            <div class="textnode report-text-node">
+
+                <span class="textid report-text-node-id"> OverallScore:  </span>
+
+               <div class="report-text-node-content">
+                 <pre class="report-text report-text-plain">894.06</pre>
+               </div>
+
+            </div>
+            
+    <div class='report-node' id="Evaluation-Final25-config_3_public-EpisodeVisualisation">
+    <h><a href="#Evaluation-Final25-config_3_public-EpisodeVisualisation">EpisodeVisualisation</a></h><section> 
+<div class="report-nongui-nodes">
+<div style="clear:left" class='report-figure None' id='Evaluation-Final25-config_3_public-EpisodeVisualisation-figure1'>
+    <p class="report-figure-caption"></p><div class="report-nongui-nodes">
+<p class="datanode"><a href="index.html_resources/Evaluation-Final25-config-3-public-EpisodeVisualisation-figure1-Animation.mp4">Animation</a>:  video/mp4</p>
+</div>
+</div>
+    <div class='report-node' id="Evaluation-Final25-config_3_public-EpisodeVisualisation-Player-PDM4ARSpaceship-log">
+    <h><a href="#Evaluation-Final25-config_3_public-EpisodeVisualisation-Player-PDM4ARSpaceship-log">Player-PDM4ARSpaceship-log</a></h><section> 
+<div class="report-nongui-nodes">
+<p class="datanode"><a href="index.html_resources/Evaluation-Final25-config-3-public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-PDM4ARSpaceship-log.pdf">PDM4ARSpaceship-log</a>:  application/pdf</p>
+<div class="datanode-children">
+<div class="report-nongui-nodes">
+<p class="datanode"><a href="index.html_resources/Evaluation-Final25-config-3-public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-PDM4ARSpaceship-log.png">png</a>:  image/png</p>
+</div>
+</div>
+<div style="clear:left" class='report-figure None' id='Evaluation-Final25-config_3_public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-figure1'>
+    <div class="report-subfigure ncols-1 first-col last-col"> 
+                    <a href="index.html_resources/Evaluation-Final25-config-3-public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-PDM4ARSpaceship-log.png" class="zoomable">
+                        <img src="index.html_resources/Evaluation-Final25-config-3-public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-PDM4ARSpaceship-log.png"/>
+                    </a>
+                <p class="report-subfigure-caption">PDM4ARSpaceship-log</p><p class="report-subfigure-main-link"><a href="index.html_resources/Evaluation-Final25-config-3-public-EpisodeVisualisation-Player-PDM4ARSpaceship-log-PDM4ARSpaceship-log.pdf"> main </a></p></div> 
+
+<p class="report-figure-caption"></p></div></div>
+</section> 
+</div> 
+</div>
+</section> 
+</div> 
+</div>
+</section> 
+</div> 
+</div>
+</section> 
+</div> 
+
+
+
+
+</body>
+</html>

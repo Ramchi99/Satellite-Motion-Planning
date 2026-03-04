@@ -8,7 +8,7 @@ This project implements a highly optimized motion planning algorithm for a satel
 ## Visuals
 | Config 1 | Config 2 | Config 3 |
 | :---: | :---: | :---: |
-| <img src="animation_1.gif" style="width: 100%; max-width: 300px;" /> | <img src="animation_2.gif" style="width: 100%; max-width: 300px;" /> | <img src="animation_3.gif" style="width: 100%; max-width: 300px;" /> |
+| <img src="assets/animation_1.gif" style="width: 100%; max-width: 300px;" /> | <img src="assets/animation_2.gif" style="width: 100%; max-width: 300px;" /> | <img src="assets/animation_3.gif" style="width: 100%; max-width: 300px;" /> |
 
 ## The Problem
 * **Objective:** Navigate a satellite through a constrained space (docking bay) to a target while adhering to non-linear orbital dynamics and strict control limits.
@@ -36,7 +36,7 @@ Because the simulation environment was deterministic, we could rely entirely on 
 To solve this, we developed an **Impulse Preservation** mapping:
 
 <p align="center">
-  <img src="impulse_preservation.jpeg" alt="Impulse Preservation" width="600"/>
+  <img src="assets/impulse_preservation.jpeg" alt="Impulse Preservation" width="600"/>
 </p>
 
 Instead of simply applying the solver's discrete control value directly (which might under-actuate or over-actuate during a timestep), we mathematically guarantee that the *integral of the control input* (the impulse) over the time step $\Delta t$ exactly matches the impulse intended by the optimizer's discretization scheme. 

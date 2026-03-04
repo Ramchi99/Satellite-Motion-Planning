@@ -17,7 +17,6 @@ import numpy as np
 from numpy.linalg import norm
 
 from pdm4ar.exercises.ex13.discretization import *
-from pdm4ar.exercises_def.ex11.goal import DockingTarget
 from pdm4ar.exercises_def.ex13.utils_params import PlanetParams, AsteroidParams
 
 from pdm4ar.exercises_def.ex13.goal import DockingTarget

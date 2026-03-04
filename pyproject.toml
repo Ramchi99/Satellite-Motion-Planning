@@ -62,7 +62,7 @@ ipykernel = "6.29.5"
 
 # others
 pre-commit = "3.8.0"
-#setuptools = "*"
+setuptools = "<82.0.0"
 #wheel = "*"
 
 
